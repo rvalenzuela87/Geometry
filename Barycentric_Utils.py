@@ -1,6 +1,6 @@
 import math
 import Vector_Utils as vu
-reload( vu )
+reload(vu)
 
 
 def triangle_barycentric_coord(point, triangle):
@@ -46,48 +46,54 @@ def poly_wachspress_coord(point, polygon):
         :return: List of float values; one for each of the polygon\'s points
     """
 
-    b = [ 0.0 for i in range( len( polygon ) ) ]    # Polygon\'s inner triangles\' areas
-    a = [ 0.0 for i in range( len( polygon ) ) ]    # Point-Vertex areas
-    w = [ 0.0 for i in range( len( polygon ) ) ]    # Weights
-    l = [ 0.0 for i in range( len( polygon ) ) ]    # Lambdas
+    inner_triangles_areas = [0.0 for __ in range(len(polygon))]     # Polygon's inner triangles' areas
+    point_vertex_areas = [0.0 for __ in range(len(polygon))]        # Point-Vertex areas
+    weights = [0.0 for __ in range(len(polygon))]    # Weights
+    lambdas = [0.0 for __ in range(len(polygon))]    # Lambdas
 
-    w_sum = 0.0     # Total weight
+    weights_sum = 0.0
 
-    for i in range( len( polygon ) ):
-        p       = polygon[i]         # Point (tuple or list)
-        prev_p  = polygon[i - 1]     # Point (tuple or list)
+    for i in range(len( polygon)):
+        vertex       = polygon[i]         # Point (tuple or list)
+        prev_vertex  = polygon[i - 1]     # Point (tuple or list)
 
         try:
-            next_p = polygon[i + 1]  # Point (tuple or list)
+            next_vertex = polygon[i + 1]  # Point (tuple or list)
         except IndexError:
-            next_p = polygon[0]
+            next_vertex = polygon[0]
 
-        b[i] = vu.outter_prod_2D( vu.vector_sub( p, prev_p ), vu.vector_sub( next_p, p ) )
-        a[i] = vu.outter_prod_2D( vu.vector_sub( p, point ), vu.vector_sub( next_p, point ) )
+        inner_triangles_areas[i] = vu.outter_prod_2D(
+            vu.vector_sub(vertex, prev_vertex),
+            vu.vector_sub(next_vertex, vertex)
+        )
+        point_vertex_areas[i] = vu.outter_prod_2D(
+            vu.vector_sub(vertex, point),
+            vu.vector_sub(next_vertex, point)
+        )
 
-    for i in range( len( polygon ) ):
+    for i in range(len(polygon)):
         areas_prod = 1.0
         prev_i = i - 1
 
         if i == 0:
-            prev_i = len( polygon ) - 1
+            prev_i = len(polygon) - 1
 
-        for j in range( len( a ) ):
-            if j == i or j == prev_i:
+        for j in range(len(point_vertex_areas)):
+            if j in [i, prev_i]:
                 continue
             else:
-                areas_prod *= a[j]
+                areas_prod *= point_vertex_areas[j]
 
-        w[i] = b[i] * areas_prod
-        w_sum += w[i]
+        weights[i] = inner_triangles_areas[i] * areas_prod
+        weights_sum += weights[i]
 
-    for i in range( len( w ) ):
-        l[i] = w[i] / w_sum
+    for i in range(len(weights)):
+        lambdas[i] = weights[i] / weights_sum
 
-    return l
+    return lambdas
 
 
-def poly_mean_value_coord( point, polygon ):
+def poly_mean_value_coord(point, polygon):
     """
     Calculates the mean value coordinates for the point passed as first argument in relation to the polygon (list of
     points) passed as second argument indistinct of it being convex or non-convex. All the points are assumed to be
@@ -99,10 +105,10 @@ def poly_mean_value_coord( point, polygon ):
         :return: List of float values; one for each of the polygon\'s points
     """
 
-    w = [0.0 for i in range(len(polygon))]  # Weights
-    l = [0.0 for i in range(len( polygon))]  # Lambdas
+    weights = [0.0 for __ in range(len(polygon))]  # Weights
+    lambdas = [0.0 for __ in range(len(polygon))]  # Lambdas
 
-    w_sum = 0.0
+    weights_sum = 0.0
 
     for i in range(len(polygon)):
         vtx = polygon[i]
@@ -118,20 +124,67 @@ def poly_mean_value_coord( point, polygon ):
         angle = vu.angle_between(vtx_min_point, vu.vector_sub(next_vtx, point), True)
         prev_angle = vu.angle_between(vu.vector_sub(prev_vtx, point), vtx_min_point, True)
 
-        w[i] = (math.tan(prev_angle * 0.5) + math.tan(angle * 0.5)) / math.sqrt(vu.inner_prod(vtx_min_point, vtx_min_point))
-        w_sum += w[i]
+        weights[i] = (math.tan(prev_angle * 0.5) + math.tan(angle * 0.5)) / math.sqrt(vu.inner_prod(vtx_min_point, vtx_min_point))
+        weights_sum += weights[i]
 
-    for i in range(len(w)):
-        l[i] = w[i] / w_sum
+    for i in range(len(weights)):
+        lambdas[i] = weights[i] / weights_sum
 
-    return l
+    return lambdas
+
+
+def poly_mean_value_coord(point, polygon):
+    """
+    Calculates the mean value coordinates for the point passed as first argument in relation to the polygon (list of
+    points) passed as second argument indistinct of it being convex or non-convex. All the points are assumed to be
+    barycentric independent and in R2, i.e. 2 dimensional.
+
+        :param point: List or tuple of two numbers
+        :param polygon: List containing, at least, 3 points (list or tuple)
+
+        :return: List of float values; one for each of the polygon\'s points
+    """
+
+    weights = [0.0 for __ in range(len(polygon))]  # Weights
+    lambdas = [0.0 for __ in range(len(polygon))]  # Lambdas
+
+    weights_sum = 0.0
+
+    for i in range(len(polygon)):
+        vtx = polygon[i]
+        prev_vtx = polygon[i - 1]
+
+        try:
+            next_vtx = polygon[i + 1]
+        except IndexError:
+            next_vtx = polygon[0]
+
+        point_minus_vertex = vu.vector_sub(vtx, point)
+
+        sigma_angle = vu.angle_between(point_minus_vertex, vu.vector_sub(next_vtx, vtx), True)
+        gamma_angle = vu.angle_between(vu.vector_sub(prev_vtx, vtx), point_minus_vertex, True)
+
+        weights[i] = ((1.0/math.tan(gamma_angle)) + (1.0/math.tan(sigma_angle))) / vu.inner_prod(point_minus_vertex, point_minus_vertex)
+        weights_sum += weights[i]
+
+    for i in range(len(weights)):
+        lambdas[i] = weights[i] / weights_sum
+
+    return lambdas
+
+
+def generalized_barycentric_coordinates(point, polygon):
+    for i in range(len(polygon)):
+        vertex = polygon[i]
+        next_vertex = polygon[i + 1]
+        prev_vertex = polygon[i -1]
 
 
 def tetrahedron_barycentric_coord(point, tetrahedron):
-    l   = [0.0 for vtx in tetrahedron]      # Lambdas
-    vol = [0.0 for vtx in tetrahedron]      # Volumes
+    lambdas  = [0.0 for __ in tetrahedron]      # Lambdas
+    volumes = [0.0 for __ in tetrahedron]      # Volumes
 
-    vol_t = 0.0
+    volumes_sum = 0.0
 
     for i in range(len(tetrahedron)):
         vtx = tetrahedron[i]
@@ -155,13 +208,12 @@ def tetrahedron_barycentric_coord(point, tetrahedron):
         
         # print( vu.outter_prod_3D(vector_a, vector_b, vector_c))
 
-        vol[i - 1] = vu.outter_prod_3D(vector_a, vector_b, vector_c) * (1.0/math.factorial(3))
-
-        vol_t += vol[i - 1]
+        volumes[i - 1] = vu.outter_prod_3D(vector_a, vector_b, vector_c) * (1.0/math.factorial(3))
+        volumes_sum += volumes[i - 1]
 
     # print("Volume total: %f" % vol_t)
 
-    for i in range(len(vol)):
-        l[i] = vol[i]/vol_t
+    for i in range(len(volumes)):
+        lambdas[i] = volumes[i]/volumes_sum
 
-    return l
+    return lambdas
