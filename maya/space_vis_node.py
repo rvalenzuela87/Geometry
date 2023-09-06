@@ -50,6 +50,8 @@ class SpaceVis(omui.MPxLocatorNode):
 	drawRegistrantId = "SpaceVisPlugin"
 	typeId = om.MTypeId(0x80006)
 
+	planes_scale_attr = None
+
 	def __init__(self):
 		super(SpaceVis, self).__init__()
 
@@ -59,7 +61,14 @@ class SpaceVis(omui.MPxLocatorNode):
 
 	@staticmethod
 	def initialize():
-		pass
+		mfn_num_attr = om.MFnNumericAttribute()
+		SpaceVis.planes_scale_attr = mfn_num_attr.create("planesScale", "planesScale", om.MFnNumericData.kDouble)
+		mfn_num_attr.keyable = True
+		mfn_num_attr.storable = True
+		mfn_num_attr.writable = True
+		mfn_num_attr.default = 1.0
+
+		SpaceVis.addAttribute(SpaceVis.planes_scale_attr)
 
 	def default_bounding_box(self):
 		return om.MBoundingBox()
@@ -73,7 +82,7 @@ class SpaceVis(omui.MPxLocatorNode):
 		pass
 
 	def draw(self, view, path, style, status):
-		vtx_points, tri_points, __ = space_vis_vertices_pos()[0]
+		vtx_points, tri_points, __ = space_vis_vertices_pos()
 		rows_count = 5
 		cols_count = 5
 
@@ -164,10 +173,12 @@ class SpaceVisGeometryOverride(omr.MPxGeometryOverride):
 
 	def __init__(self, obj):
 		super(SpaceVisGeometryOverride, self).__init__(obj)
+
 		vtx_points, tri_points, vtx_normals = space_vis_vertices_pos()
 		self.vtx_vectors = [om.MVector(*point) for point in vtx_points]
 		self.tri_vectors = [om.MVector(*point) for point in tri_points]
 		self.vtx_normals_vectors = [om.MVector(*normal) for normal in vtx_normals]
+		self.plane_tris_count = int(len(self.tri_vectors) / 3)
 
 		# Create planes' render items shaders
 		for item_name, item_colors in zip(self.PLANES_ITEMS_NAMES, self.PLANES_ITEMS_COLORS):
@@ -179,6 +190,10 @@ class SpaceVisGeometryOverride(omr.MPxGeometryOverride):
 			self._render_items.append(("{}Wire".format(item_name), omr.MGeometry.kTriangles,
 			                           omr.MGeometry.kWireframe, plane_shader))
 
+	@classmethod
+	def creatorcls(cls, obj):
+		return cls(obj)
+
 	def supportedDrawAPIs(self):
 		# Supports GL and DX
 		return omr.MRenderer.kOpenGL | omr.MRenderer.kOpenGLCoreProfile | omr.MRenderer.kDirectX11
@@ -186,55 +201,61 @@ class SpaceVisGeometryOverride(omr.MPxGeometryOverride):
 	def hasUIDrawables(self):
 		return False
 
+	def updateRenderItems(self, dag_path, render_list):
+		for item_name, geo_type, draw_mode, shader in self._render_items:
+			index = render_list.indexOf(item_name)
+			if index < 0:
+				render_item = omr.MRenderItem.create(item_name, omr.MRenderItem.DecorationItem, geo_type)
+				render_item.setDrawMode(draw_mode)
+				render_item.setDepthPriority(5)
+				render_list.append(render_item)
+			else:
+				render_item = render_list[index]
+
+			render_item.setShader(shader)
+			render_item.enable(True)
+
 	def populateGeometry(self, requirements, render_items, data):
 		vtx_buffer_descriptor_list = requirements.vertexRequirements()
 
 		for vtx_buffer_descriptor in vtx_buffer_descriptor_list:
 			vtx_vectors_count = len(self.tri_vectors)
+			vts_buffer = data.createVertexBuffer(vtx_buffer_descriptor)
+			vts_data_addr = vts_buffer.acquire(vtx_vectors_count, True)
+			vts_data = ((ctypes.c_float * 3) * vtx_vectors_count).from_address(vts_data_addr)
 
 			if vtx_buffer_descriptor.semantic == omr.MGeometry.kPosition:
-				vts_buffer = data.createVertexBuffer(vtx_buffer_descriptor)
-				vts_position_data_addr = vts_buffer.acquire(vtx_vectors_count, True)
-				vts_position_data = ((ctypes.c_float * 3) * vtx_vectors_count).from_address(vts_position_data_addr)
 				for i in range(vtx_vectors_count):
 					pos = self.tri_vectors[i]
 					for j in range(len(pos)):
-						vts_position_data[i][j] = pos[j]
-				vts_buffer.commit(vts_position_data_addr)
+						vts_data_addr[i][j] = pos[j]
 			elif vtx_buffer_descriptor.semantic == omr.MGeometry.kNormal:
-				vts_normal_buffer = data.createVertexBuffer(vtx_buffer_descriptor)
-				vts_normal_data_addr = vts_normal_buffer.acquire(vtx_vectors_count, True)
-				vts_normal_data = ((ctypes.c_float * 3) * vtx_vectors_count).from_address(vts_normal_data_addr)
-
 				for i in range(vtx_vectors_count):
 					normal = self.vtx_normals_vectors[i]
 					for j in range(len(normal)):
-						vts_normal_data[i][j] = normal[j]
-				vts_normal_buffer.commit(vts_normal_data_addr)
+						vts_data_addr[i][j] = normal[j]
 			else:
-				pass
+				continue
+
+			vts_buffer.commit(vts_data)
 
 		for item in render_items:
 			if not item:
 				continue
 
-			index_buffer = data.createIndexBuffer(omr.MGeometry.kUnsignedInt32)
-			if item.name().startswith(self.PLANES_ITEMS_NAMES[0]):
-				plane_points_start = 0
-				plane_points_end = 96    # Each plane has 96 triangle points (16 * 6)
-			elif item.name().startswith(self.PLANES_ITEMS_NAMES[1]):
-				plane_points_start = 96
-				plane_points_end = 96 * 2
+			for plane_index, plane_name in enumerate(self.PLANES_ITEMS_NAMES):
+				if item.name().startswith(plane_name):
+					plane_points_start = plane_index * self.plane_tris_count
+					break
 			else:
-				plane_points_start = 96 * 2
-				plane_points_end = 96 * 3
+				continue
 
-			plane_shape_vectors = self.tri_vectors[plane_points_start:plane_points_end]
-			plane_tri_vectors_count = len(plane_shape_vectors)
-			indices_address = index_buffer.acquire(plane_tri_vectors_count, True)
-			indices = (ctypes.c_uint * plane_tri_vectors_count).from_address(indices_address)
-			for i in range(plane_tri_vectors_count):
-				indices[i] = i
+			index_buffer = data.createIndexBuffer(omr.MGeometry.kUnsignedInt32)
+			indices_address = index_buffer.acquire(self.plane_tris_count, True)
+			indices = (ctypes.c_uint * self.plane_tris_count).from_address(indices_address)
+			for i in range(self.plane_tris_count):
+				indices[i] = plane_points_start + i
+
 			index_buffer.commit(indices_address)
 			item.associateWithIndexBuffer(index_buffer)
 
@@ -243,7 +264,7 @@ def initializePlugin(obj):
 	plugin = om.MFnPlugin(obj, "Rafael Valenzuela Ochoa", "1.0", "HuevoCartoon")
 	try:
 		plugin.registerNode(
-			"transformControl",
+			"spaceVis",
 			SpaceVis.typeId,
 			SpaceVis.creator,
 			SpaceVis.initialize,
@@ -251,7 +272,7 @@ def initializePlugin(obj):
 			SpaceVis.drawDBClassification
 		)
 	except RuntimeError as re:
-		sys.stderr.write( "Failed to register node TransformControlLocator." )
+		sys.stderr.write( "Failed to register node SpaceVis." )
 		raise re
 
 	# Register Viewport 2.0 implementation
@@ -262,12 +283,12 @@ def initializePlugin(obj):
 			SpaceVisGeometryOverride.creator
 		)
 	except:
-		sys.stderr.write("Failed to register override for node TransformControlLocator")
+		sys.stderr.write("Failed to register override for node SpaceVis")
 		raise
 
 	try:
-		om.MSelectionMask.registerSelectionType("transformControlSelection")
-		mel.eval("selectType -byName \"transformControlSelection\" 1")
+		om.MSelectionMask.registerSelectionType("spaceVisSelection")
+		mel.eval("selectType -byName \"spaceVisSelection\" 1")
 	except:
 		sys.stderr.write("Failed to register selection mask\n")
 		raise
@@ -278,7 +299,7 @@ def uninitializePlugin(obj):
 	try:
 		plugin.deregisterNode(SpaceVis.typeId)
 	except RuntimeError as re:
-		sys.stderr.write("Failed to deregister node TransformControlLocator")
+		sys.stderr.write("Failed to deregister node SpaceVis")
 		pass
 
 	# De-register Viewport 2.0 implementation
@@ -288,11 +309,11 @@ def uninitializePlugin(obj):
 			SpaceVis.drawRegistrantId
 		)
 	except:
-		sys.stderr.write("Failed to deregister override for node TransformControlLocator")
+		sys.stderr.write("Failed to deregister override for node SpaceVis")
 		pass
 
 	try:
-		om.MSelectionMask.deregisterSelectionType("transformControlSelection")
+		om.MSelectionMask.deregisterSelectionType("SpaceVis")
 	except:
 		sys.stderr.write("Failed to deregister selection mask\n")
 		pass
