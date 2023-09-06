@@ -5,6 +5,7 @@ reload(Matrix)
 
 default_tolerance = 0.0001
 
+
 def is_matrix_addition_defined(matrix_a, matrix_b):
 	return matrix_a.rows == matrix_b.rows and matrix_a.cols == matrix_b.cols
 

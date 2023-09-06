@@ -1,6 +1,30 @@
 import math
-import Vector_Utils as vu
+from Geometry import Vector_Utils as vu
+from Geometry import Matrix_Utils as mu
+from Geometry import Matrix
 reload(vu)
+
+
+def center_of_mass(points):
+    second_point = points[-1]
+    first_point = points[-2]
+
+    center_position = vu.vector_add(
+        vu.vector_sub(second_point, vu.vector_scalar_prod(first_point, 0.5)),
+        first_point
+    )
+    accum_weight = 2
+
+    for i in range(len(points) - 3, -1, -1):
+        second_point = points[i]
+        second_minus_center = vu.vector_sub(second_point, center_position)
+        center_position = vu.vector_add(
+            vu.vector_scalar_prod(second_minus_center, (1.0/(float(accum_weight) + 1.0))),
+            center_position
+        )
+        accum_weight += 1
+
+    return center_position
 
 
 def triangle_barycentric_coord(point, triangle):
@@ -133,7 +157,7 @@ def poly_mean_value_coord(point, polygon):
     return lambdas
 
 
-def poly_mean_value_coord(point, polygon):
+def poly_mean_value_coord_cot_bck(point, polygon):
     """
     Calculates the mean value coordinates for the point passed as first argument in relation to the polygon (list of
     points) passed as second argument indistinct of it being convex or non-convex. All the points are assumed to be
@@ -150,6 +174,12 @@ def poly_mean_value_coord(point, polygon):
 
     weights_sum = 0.0
 
+    def cotangent_at_b(vector_a_2d, vector_b_2d, vector_c_2d):
+        vector_b_to_a = vu.vector_sub(vector_a_2d, vector_b_2d)
+        vector_b_to_c = vu.vector_sub(vector_c_2d, vector_b_2d)
+
+        return vu.inner_prod(vector_b_to_c, vector_b_to_a) / vu.outter_prod_2D(vector_b_to_c, vector_b_to_a)
+
     for i in range(len(polygon)):
         vtx = polygon[i]
         prev_vtx = polygon[i - 1]
@@ -160,11 +190,11 @@ def poly_mean_value_coord(point, polygon):
             next_vtx = polygon[0]
 
         point_minus_vertex = vu.vector_sub(vtx, point)
-
-        sigma_angle = vu.angle_between(point_minus_vertex, vu.vector_sub(next_vtx, vtx), True)
-        gamma_angle = vu.angle_between(vu.vector_sub(prev_vtx, vtx), point_minus_vertex, True)
-
-        weights[i] = ((1.0/math.tan(gamma_angle)) + (1.0/math.tan(sigma_angle))) / vu.inner_prod(point_minus_vertex, point_minus_vertex)
+        if vu.outter_prod_2D(vu.vector_sub(next_vtx, vtx), vu.vector_sub(point, vtx)) > vu.length(vu.vector_sub(next_vtx, vtx)):
+            weights[i] = cotangent_at_b(point, vtx, prev_vtx) + cotangent_at_b(point, vtx, next_vtx)
+            weights[i] /= vu.inner_prod(point_minus_vertex, point_minus_vertex)
+        else:
+            pass
         weights_sum += weights[i]
 
     for i in range(len(weights)):
@@ -173,11 +203,78 @@ def poly_mean_value_coord(point, polygon):
     return lambdas
 
 
-def generalized_barycentric_coordinates(point, polygon):
-    for i in range(len(polygon)):
-        vertex = polygon[i]
-        next_vertex = polygon[i + 1]
-        prev_vertex = polygon[i -1]
+def poly_mean_value_coord_cot(point, polygon):
+    """
+    Calculates the mean value coordinates for the point passed as first argument in relation to the polygon (list of
+    points) passed as second argument indistinct of it being convex or non-convex. All the points are assumed to be
+    barycentric independent and in R2, i.e. 2 dimensional.
+
+        :param point: List or tuple of two numbers
+        :param polygon: List containing, at least, 3 points (list or tuple)
+
+        :return: List of float values; one for each of the polygon\'s points
+    """
+
+    weights = [0.0 for __ in range(len(polygon))]  # Weights
+    lambdas = [0.0 for __ in range(len(polygon))]  # Lambdas
+
+    weights_sum = 0.0
+    polygon_center_of_mass = center_of_mass(polygon)
+    '''print("COM: {}".format(polygon_center_of_mass))'''
+    point_dir = vu.vector_sub(point, polygon_center_of_mass)
+    '''print("Point direction: {}".format(point_dir))'''
+    point_start = polygon_center_of_mass
+    point_edges_intersections_total = 0
+
+    for i in range(0, len(polygon), 1):
+        edge_dir = vu.vector_sub(polygon[i], polygon[i - 1])
+        edge_start = polygon[i - 1]
+        '''print("-- Edge start: {}".format(edge_start))
+        print("-- Edge direction: {}".format(edge_dir))'''
+        result_vector = vu.vector_sub(point_start, edge_start)
+        matrix = Matrix.Matrix(
+            2, 2, [edge_dir[0], point_dir[0] * -1.0, edge_dir[1], point_dir[1] * -1.0]
+        )
+        k_matrix = Matrix.Matrix(2, 1, [result_vector[0], result_vector[1]])
+
+        try:
+            __, solution = mu.in_column_space(k_matrix, matrix)
+            assert 0.0 < solution.get(0, 0) < 1.0 and 0.0 < solution.get(1, 0) < 1.0
+        except AssertionError:
+            '''print("-- Solution: {}".format(solution))'''
+        except(RuntimeError, Exception) as exc:
+            print(exc.message)
+            continue
+        else:
+            point_edges_intersections_total += 1
+
+    try:
+        assert point_edges_intersections_total == 0 or point_edges_intersections_total % 2 == 0
+    except AssertionError:
+        raise RuntimeError("Point is outside polygon")
+    else:
+        for i in range(len(polygon)):
+            vtx = polygon[i]
+            prev_vtx = polygon[i - 1]
+
+            try:
+                next_vtx = polygon[i + 1]
+            except IndexError:
+                next_vtx = polygon[0]
+
+            point_minus_vertex = vu.vector_sub(vtx, point)
+
+            sigma_angle = vu.angle_between(point_minus_vertex, vu.vector_sub(next_vtx, vtx), True)
+            gamma_angle = vu.angle_between(vu.vector_sub(prev_vtx, vtx), point_minus_vertex, True)
+
+            weights[i] = (1.0/math.tan(gamma_angle)) + (1.0/math.tan(sigma_angle))
+            weights[i] /= vu.inner_prod(point_minus_vertex, point_minus_vertex)
+            weights_sum += weights[i]
+
+        for i in range(len(weights)):
+            lambdas[i] = weights[i] / weights_sum
+
+        return lambdas
 
 
 def tetrahedron_barycentric_coord(point, tetrahedron):
