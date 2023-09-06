@@ -1,6 +1,34 @@
 import math
-import Vector_Utils as vu
-reload(vu)
+from collections import namedtuple
+from . import Vector_Utils as vu
+
+
+Point = namedtuple('Point', ['x', 'y', 'z'])
+WPoint = namedtuple('WPoint', ['x', 'y', 'z', 'w'])
+
+
+def center_of_mass(points):
+    """
+
+    :param list|tuple[Point|WPoint] points:
+    :return:
+    :rtype: tuple[float, float, float]
+    """
+
+    prev_point = points[0]
+    prev_vector = [prev_point.x, prev_point.y, prev_point.z]
+    weight_sum = prev_point.w if isinstance(prev_point, WPoint) else 1.0
+
+    for point_index in range(1, len(points), 1):
+        point = points[point_index]
+        vector = [point.x, point.y, point.z]
+        point_w = point.w if isinstance(point, WPoint) else 1.0
+        weight_sum += point_w
+        sub_vector = vu.vector_sub([vector, prev_vector])
+        scaled_sub_vector = vu.vector_scalar_prod(sub_vector, point_w / weight_sum)
+        prev_vector = vu.vector_add([prev_vector, scaled_sub_vector])
+
+    return prev_vector
 
 
 def triangle_barycentric_coord(point, triangle):
@@ -9,17 +37,17 @@ def triangle_barycentric_coord(point, triangle):
     containing 3 points) passed as second argument. All points are assumed to be barycentric independent and in R2,
     i.e. 2 dimensional.
 
-        :param point: List or tuple of two numbers
-        :param triangle: List containing 3 points (list or tuple)
+    :param Point|list[float,float] point: List or tuple of two numbers
+    :param list[list, list, list]|list[Point, Point, Point] triangle: List containing 3 points (list or tuple)
 
-        :return: List of floats
+    :return: List of floats
     """
 
     # ... Use the point\'s projection to calculate the barycentric coordinates
 
-    area1 = vu.outter_prod_2D(vu.vector_sub(triangle[0], point), vu.vector_sub(triangle[1], point)) * 0.5
-    area2 = vu.outter_prod_2D(vu.vector_sub(triangle[1], point), vu.vector_sub(triangle[2], point)) * 0.5
-    area3 = vu.outter_prod_2D(vu.vector_sub(triangle[2], point), vu.vector_sub(triangle[0], point)) * 0.5
+    area1 = vu.outter_prod_2D(vu.vector_sub([triangle[0], point]), vu.vector_sub([triangle[1], point])) * 0.5
+    area2 = vu.outter_prod_2D(vu.vector_sub([triangle[1], point]), vu.vector_sub([triangle[2], point])) * 0.5
+    area3 = vu.outter_prod_2D(vu.vector_sub([triangle[2], point]), vu.vector_sub([triangle[0], point])) * 0.5
 
     '''print("Area 1: {}".format(area1))
     print("Area 2: {}".format(area2))

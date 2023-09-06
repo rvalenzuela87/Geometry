@@ -1,9 +1,9 @@
-from decimal import Decimal
 import math
-from Geometry import Matrix
-reload(Matrix)
+from decimal import Decimal
+from Geometry.classes import Matrix
 
-default_tolerance = 0.0001
+DEFAULT_TOLERANCE = 0.0001
+
 
 def is_matrix_addition_defined(matrix_a, matrix_b):
 	return matrix_a.rows == matrix_b.rows and matrix_a.cols == matrix_b.cols
@@ -13,7 +13,7 @@ def is_matrix_prod_defined(matrix_a, matrix_b):
 	return matrix_a.cols == matrix_b.rows
 
 
-def is_identity_row(row, tolerance=default_tolerance):
+def is_identity_row(row, tolerance=DEFAULT_TOLERANCE):
 	accum = 0.0
 
 	for e in row:
@@ -22,7 +22,7 @@ def is_identity_row(row, tolerance=default_tolerance):
 	return round(Decimal(str(accum)), int(math.log(1.0/tolerance, 10))) == 1.0
 
 
-def is_zero_row(row, tolerance=default_tolerance):
+def is_zero_row(row, tolerance=DEFAULT_TOLERANCE):
 	accum = 0.0
 
 	for e in row:
@@ -31,7 +31,7 @@ def is_zero_row(row, tolerance=default_tolerance):
 	return round(Decimal(str(accum)), int(math.log(1.0/tolerance, 10))) == 0.0
 
 
-def row_equivalence(matrix_a, matrix_b, tolerance=default_tolerance):
+def row_equivalence(matrix_a, matrix_b, tolerance=DEFAULT_TOLERANCE):
 	"""
 
 		:param matrix_a: Matrix instance
@@ -56,7 +56,7 @@ def row_equivalence(matrix_a, matrix_b, tolerance=default_tolerance):
 		return True
 
 
-def col_equivalence(matrix_a, matrix_b, tolerance=default_tolerance):
+def col_equivalence(matrix_a, matrix_b, tolerance=DEFAULT_TOLERANCE):
 	"""
 
 		:param matrix_a: Matrix instance
@@ -162,7 +162,7 @@ def column_space(matrix, x=None):
 	return matrix_prod( matrix, x )
 
 
-def in_column_space(k, matrix, tolerance=default_tolerance):
+def in_column_space(k, matrix, tolerance=DEFAULT_TOLERANCE):
 	"""
 	Finds weather matrix k is in the column space = { k(m x 1} | matrix * x = k } of the matrix passed as the second argument.
 		:param k: Matrix instance with dimension m x 1, where m = matrix\'s # of rows
@@ -279,7 +279,7 @@ def elementary_row_operation_3(matrix, row_i_index, row_j_index, scalar_k ):
 	return matrix_cp
 
 
-def row_reduced_echelon(matrix, tolerance=default_tolerance):
+def row_reduced_echelon(matrix, tolerance=DEFAULT_TOLERANCE):
 	"""
 	Finds the row-reduced-echelon form for the matrix received as argument.
 
@@ -402,7 +402,7 @@ def elementary_column_operation_3(matrix, col_i_index, col_j_index, scalar_k):
 	return matrix_cp
 
 
-def column_reduced_echelon(matrix, tolerance=default_tolerance):
+def column_reduced_echelon(matrix, tolerance=DEFAULT_TOLERANCE):
 	"""
 	Finds the column-reduced-echelon form for the matrix received as argument.
 
