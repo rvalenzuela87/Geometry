@@ -36,6 +36,7 @@ def space_vis_vertices_pos():
 			plane_off,
 			plane_off + cols_count - 1,
 			plane_off + (rows_count * (cols_count - 1)),
+			plane_off + (rows_count * (cols_count - 1)),
 			plane_off + (rows_count * cols_count) - 1,
 			plane_off + cols_count - 1
 		]
@@ -148,7 +149,9 @@ class SpaceVis(omui.MPxLocatorNode):
 
 			gl_ft.glBegin(v1omr.MGL_TRIANGLE_FAN)
 
-			for point_id in plane_points_ids:
+			for point_index, point_id in enumerate(plane_points_ids):
+				if point_index > 0 and point_index % 3 == 0:
+					continue
 				gl_ft.glVertex3f(*vtx_points[point_id])
 
 			gl_ft.glEnd()
@@ -214,14 +217,32 @@ class SpaceVisGeometryOverride(omr.MPxGeometryOverride):
 		print(">> Normals: {}".format(len(self.vtx_normals_vectors)))
 
 		# Create planes' render items shaders
+		depth_priority = 0.0
 		for item_name, item_colors in zip(self.PLANES_ITEMS_NAMES, self.PLANES_ITEMS_COLORS):
 			shaded_color, wire_color = item_colors
-			plane_shader = omr.MRenderer.getShaderManager().getStockShader(omr.MShaderManager.k3dBlinnShader)
-			plane_shader.setParameter('diffuseColor', shaded_color)
+			shaded_color = om.MColor(shaded_color)
+			wire_color = om.MColor(wire_color)
+
+			shaded_color.a = 0.75
+			wire_color.a = 1.0
+
+			plane_shader = omr.MRenderer.getShaderManager().getStockShader(omr.MShaderManager.k3dSolidShader)
+			plane_wire_shader = omr.MRenderer.getShaderManager().getStockShader(omr.MShaderManager.k3dThickLineShader)
+
+			# Set the shaders' parameters
+			plane_shader.setParameter('solidColor', shaded_color)
+			plane_shader.setParameter('DepthPriority', depth_priority)
+			plane_shader.setIsTransparent(True)
+
+			plane_wire_shader.setParameter('solidColor', wire_color)
+			plane_wire_shader.setParameter('lineWidth', (2.0, 2.0))
+			plane_shader.setParameter('DepthPriority', depth_priority)
 
 			self._render_items.append((item_name, omr.MGeometry.kTriangles, omr.MGeometry.kShaded, plane_shader))
-			self._render_items.append(("{}Wire".format(item_name), omr.MGeometry.kTriangles,
-			                           omr.MGeometry.kWireframe, plane_shader))
+			self._render_items.append(("{}Wire".format(item_name), omr.MGeometry.kLines,
+			                           omr.MGeometry.kWireframe, plane_wire_shader))
+			depth_priority += 1.0
+
 		print(">> Total render items: {}".format(len(self._render_items)))
 
 	@staticmethod
