@@ -168,8 +168,9 @@ class SpaceVisMixIn(object):
 		self.yz_bases = (self.PLANE_YZ_BASE1_SPECS.default, self.PLANE_YZ_BASE2_SPECS.default)
 
 		planes_bases = [self.xy_bases, self.xz_bases, self.yz_bases]
-		self.vtx_points, self.vtx_normals_vectors = space_vis_points(self._planes_scale,
-		                                                             planes_bases=planes_bases)
+		self.vtx_points_backup, self.vtx_normals_vectors = space_vis_points(self._planes_scale,
+		                                                                    planes_bases=planes_bases)
+		self.vtx_points = [point for point in self.vtx_points_backup]
 		self.lines_points_ids, self.tri_points_ids = space_vis_geo_sets(*get_rows_cols_count(len(self.vtx_points)))
 
 	@property
@@ -628,6 +629,9 @@ class SpaceVisGeometryOverride(SpaceVisMixIn, omr.MPxGeometryOverride):
 	def isStreamDirty(self, desc):
 		return self._stream_dirty
 
+	def hasUIDrawables(self):
+		return True
+
 	def updateRenderItems(self, dag_path, render_list):
 		print(">> From updateRenderItems...")
 		for spec in self._render_items_specs:
@@ -703,6 +707,20 @@ class SpaceVisGeometryOverride(SpaceVisMixIn, omr.MPxGeometryOverride):
 			item.associateWithIndexBuffer(index_buffer)
 
 		self._stream_dirty = False
+
+	def addUIDrawables(self, path, draw_manager, frame_context):
+		draw_manager.beginDrawable()
+
+		text_position = om.MPoint(5.0, 5.0, 5.0)
+		text = "Test message"
+		text_align = draw_manager.kRight
+		is_dynamic = True
+
+		draw_manager.text(text_position, text, alignment=text_align, dynamic=is_dynamic)
+
+		draw_manager.endDrawable()
+
+		return self
 
 
 def initializePlugin(obj):
