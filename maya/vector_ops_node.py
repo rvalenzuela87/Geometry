@@ -13,58 +13,121 @@ DEFAULT_LINE_WIDTH = 1.0
 COMPS_COLORS = (om.MColor((1.0, 0.0, 0.0)),
                 om.MColor((0.0, 1.0, 0.0)),
                 om.MColor((0.0, 0.0, 1.0)))
-DEF_ARROW_HEIGHT = 0.3
-DEF_ARROW_BASE = 0.4
+DEF_ARROW_HEIGHT = 0.4
+DEF_ARROW_BASE = 0.3
 VectorDrawData = namedtuple("VectorDrawData", ['points', 'color', 'line_style', 'line_width', 'show_coord'])
 
 
-def _calc_arrow_head_points(camera_path, height=DEF_ARROW_HEIGHT, base=DEF_ARROW_BASE, dir_vector=None,
-                            arrow_origin=None):
-	"""
-	Calculates arrow head points projected on a camera's plane of view.
+class VectorsVisMixIn(object):
+	def __init__(self, *args, **kwargs):
+		super(VectorsVisMixIn, self).__init__(*args, **kwargs)
 
-	:param OpenMaya.MDagPath camera_path:
-	:param float height:
-	:param float base:
-	:param OpenMaya.MVector dir_vector:
-	:param OpenMaya.MPoint|OpenMaya.MVector arrow_origin:
-	:return: list[OpenMaya.MPoint, OpenMaya.MPoint, OpenMaya.MPoint, OpenMaya.MPoint]
-	"""
-	camera_fn = om.MFnCamera(camera_path)
-	cam_up_vector = camera_fn.upDirection(om.MSpace.kWorld)
-	cam_view_vector = camera_fn.viewDirection(om.MSpace.kWorld)
-	cam_base_vector = cam_up_vector ^ cam_view_vector
-	if dir_vector:
-		# Project the vector onto the camera's plane. Since both basis vectors of the camera's plane,
-		# cam_up_vector and cam_view_vector, are orthonormal (both have length = 1.0 and are 90 degrees
-		# apart), the projection calculation is simplified dot product between the direction vector and
-		# each of the basis vectors. The projection vector will then be on the space of the camera's plane,
-		# which is 2 dimensional. We'll associate the x, and y components with the cam_base_vector and
-		# cam_up_vector, respectively. Therefore, the z component represents the plane's normal (cam_view_vector).
-		dir_vector_in_cam_plane = ((dir_vector * cam_base_vector) * cam_base_vector) + (
+	@staticmethod
+	def _calc_arrow_head_points(camera_path, height=DEF_ARROW_HEIGHT, base=DEF_ARROW_BASE, dir_vector=None,
+	                            arrow_origin=None):
+		"""
+		Calculates arrow head points projected on a camera's plane of view.
+
+		:param OpenMaya.MDagPath camera_path:
+		:param float height:
+		:param float base:
+		:param OpenMaya.MVector dir_vector:
+		:param OpenMaya.MPoint|OpenMaya.MVector arrow_origin:
+		:return: list[OpenMaya.MPoint, OpenMaya.MPoint, OpenMaya.MPoint, OpenMaya.MPoint]
+		"""
+		camera_fn = om.MFnCamera(camera_path)
+		cam_up_vector = camera_fn.upDirection(om.MSpace.kWorld)
+		cam_view_vector = camera_fn.viewDirection(om.MSpace.kWorld)
+		cam_base_vector = cam_up_vector ^ cam_view_vector
+		if dir_vector:
+			# Project the vector onto the camera's plane. Since both basis vectors of the camera's plane,
+			# cam_up_vector and cam_view_vector, are orthonormal (both have length = 1.0 and are 90 degrees
+			# apart), the projection calculation is simplified dot product between the direction vector and
+			# each of the basis vectors. The projection vector will then be on the space of the camera's plane,
+			# which is 2 dimensional. We'll associate the x, and y components with the cam_base_vector and
+			# cam_up_vector, respectively. Therefore, the z component represents the plane's normal (cam_view_vector).
+			dir_vector_in_cam_plane = ((dir_vector * cam_base_vector) * cam_base_vector) + (
 					(dir_vector * cam_up_vector) * cam_up_vector)
-	else:
-		dir_vector_in_cam_plane = om.MVector(cam_up_vector)
+		else:
+			dir_vector_in_cam_plane = om.MVector(cam_up_vector)
 
-	arrow_origin = om.MVector(arrow_origin) if arrow_origin else om.MVector()
-	# Calculate the triangle points clock-wise starting from the top corner. By default, the triangle/arrow top
-	# corner point will be the world's center, which leaves the other two below the grid and the resulting triangle
-	# pointing towards the world's Y axis. It will have to be oriented based on the direction vector received as
-	# argument.
-	quats = cam_up_vector.rotateTo(dir_vector_in_cam_plane)
-	or_cam_up_vector = cam_up_vector.rotateBy(quats)
-	or_cam_base_vector = cam_base_vector.rotateBy(quats)
-	triangle_points = [om.MPoint(om.MVector(0.0, 0.0, 0.0) + arrow_origin),
-	                   om.MPoint((base * 0.5 * or_cam_base_vector) + (height * -1.0 * or_cam_up_vector) +
-	                             arrow_origin),
-	                   om.MPoint(
-		                   (base * -0.5 * or_cam_base_vector) + (height * -1.0 * or_cam_up_vector) + arrow_origin),
-	                   om.MPoint(om.MVector(0.0, 0.0, 0.0) + arrow_origin)]
+		arrow_origin = om.MVector(arrow_origin) if arrow_origin else om.MVector()
+		# Calculate the triangle points clock-wise starting from the top corner. By default, the triangle/arrow top
+		# corner point will be the world's center, which leaves the other two below the grid and the resulting triangle
+		# pointing towards the world's Y axis. It will have to be oriented based on the direction vector received as
+		# argument.
+		quats = cam_up_vector.rotateTo(dir_vector_in_cam_plane)
+		or_cam_up_vector = cam_up_vector.rotateBy(quats)
+		or_cam_base_vector = cam_base_vector.rotateBy(quats)
+		triangle_points = [om.MPoint(om.MVector(0.0, 0.0, 0.0) + arrow_origin),
+		                   om.MPoint((base * 0.5 * or_cam_base_vector) + (height * -1.0 * or_cam_up_vector) +
+		                             arrow_origin),
+		                   om.MPoint(
+			                   (base * -0.5 * or_cam_base_vector) + (height * -1.0 * or_cam_up_vector) + arrow_origin),
+		                   om.MPoint(om.MVector(0.0, 0.0, 0.0) + arrow_origin)]
 
-	return triangle_points
+		return triangle_points
+
+	def read_vectors_draw_data(self, vector_vis_shape_path, camera_path):
+		"""
+
+		:param OpenMaya.MDagPath vector_vis_shape_path:
+		:param OpenMaya.MDagPath camera_path:
+		:return:
+		:rtype: iter(VectorDrawData)
+		"""
+		w_trans_matrix = om.MTransformationMatrix(vector_vis_shape_path.exclusiveMatrix())
+		w_inv_matrix = w_trans_matrix.asMatrixInverse()
+		w_orient_quat = w_trans_matrix.rotation(asQuaternion=True)
+		w_pos_vector = w_trans_matrix.translation(om.MSpace.kWorld)
+		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
+		in_vectors_plug = mfn_dep_node.findPlug(VectorsVis.in_vectors_data_attr, False)
+		line_width = mfn_dep_node.findPlug("lineWidth", False).asDouble()
+		start_point = om.MPoint(0.0, 0.0, 0.0)
+
+		for vector_id in range(in_vectors_plug.numElements()):
+			vector_data_plug = in_vectors_plug.elementByLogicalIndex(vector_id)
+			visible_plug = vector_data_plug.child(4)
+			if not visible_plug.asBool():
+				continue
+
+			end_plug = vector_data_plug.child(0)
+			color_plug = vector_data_plug.child(1)
+			line_style = vector_data_plug.child(2).asShort()
+			coord_vis = vector_data_plug.child(3).asBool()
+			end_point = om.MPoint(end_plug.child(0).asDouble(),
+			                      end_plug.child(1).asDouble(),
+			                      end_plug.child(2).asDouble())
+			color = om.MColor()
+			color.r = color_plug.child(0).asFloat()
+			color.g = color_plug.child(1).asFloat()
+			color.b = color_plug.child(2).asFloat()
+
+			vector_points = [start_point, end_point]
+			arrow_dir_vector = (end_point - start_point).rotateBy(w_orient_quat)
+			arrow_origin = w_pos_vector + arrow_dir_vector
+			arrow_points = self._calc_arrow_head_points(camera_path, dir_vector=arrow_dir_vector,
+			                                            arrow_origin=arrow_origin)
+			for i, point in enumerate(arrow_points):
+				if i > 1:
+					vector_points.append(arrow_points[i - 1] * w_inv_matrix)
+				vector_points.append(point * w_inv_matrix)
+
+			yield VectorDrawData(vector_points, color, line_style, line_width, coord_vis)
+
+	@staticmethod
+	def coordinates_to_text(point):
+		"""
+
+		:param OpenMaya.MPoint point:
+		:return:
+		:rtype: str
+		"""
+		trunc_coord = [math.trunc(c * 100) / 100 for c in (point.x, point.y, point.z)]
+		return "({}, {}, {})".format(*trunc_coord)
 
 
-class VectorsVis(omui.MPxLocatorNode):
+class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	drawDBClassification = "drawdb/geometry/vectorsVis"
 	drawRegistrantId = "VectorsVisPlugin"
 	typeId = om.MTypeId(0x80007)
@@ -151,11 +214,65 @@ class VectorsVis(omui.MPxLocatorNode):
 		return cls()
 
 	def compute(self, plug, data_block):
+		"""
+
+		:param OpenMaya.MPlug plug:
+		:param OpenMaya.MDataBlock data_block:
+		:return:
+		"""
 		data_block.setClean(plug)
 		return
 
 	def draw(self, view, path, style, status):
-		pass
+		"""
+
+		:param OpenMayaUI.M3dView view:
+		:param OpenMaya.MDagPath path:
+		:param int style: Style to draw object in. See M3dView.displayStyle() for a list of valid styles.
+		:param int status: selection status of object. See M3dView.displayStatus() for a list of valid status.
+		:return: Reference to self
+		:rtype: OpenMayaUI.MPxLocatorNode
+		"""
+		shape_path = om.MDagPath(path).extendToShape()
+		view_camera_path = view.getCamera()
+		vectors_draw_data = self.read_vectors_draw_data(shape_path, view_camera_path)
+
+		# Drawing in VP1 views will be done using V1 Python APIs
+		import maya.OpenMayaRender as v1omr
+
+		gl_renderer = v1omr.MHardwareRenderer.theRenderer()
+		gl_ft = gl_renderer.glFunctionTable()
+		gl_ft.glPushAttrib(v1omr.MGL_CURRENT_BIT)
+
+		# Start gl drawing
+		view.beginGL()
+
+		# Start drawing the vectors' lines
+		for draw_data in vectors_draw_data:
+			color = draw_data.color
+			gl_ft.glColor4f(color.r, color.g, color.b, 1.0)
+			gl_ft.glLineWidth(draw_data.line_width)
+
+			# Start drawing the vector's lines
+			gl_ft.glBegin(v1omr.MGL_LINES)
+
+			for i in range(0, len(draw_data.points), 2):
+				start_point = draw_data.points[i]
+				end_point = draw_data.points[i + 1]
+				gl_ft.glVertex3f(start_point.x, start_point.y, start_point.z)
+				gl_ft.glVertex3f(end_point.x, end_point.y, end_point.z)
+
+			# End drawing the vector's lines
+			gl_ft.glEnd()
+
+			if draw_data.show_coord:
+				end_point = draw_data.points[1]
+				view.drawText(self.coordinates_to_text(end_point), end_point)
+
+		# Restore the state
+		gl_ft.glPopAttrib()
+		view.endGL()
+		return self
 
 
 #######################################################################################################################
@@ -163,6 +280,7 @@ class VectorsVis(omui.MPxLocatorNode):
 #  Viewport 2.0 override implementation
 #
 #######################################################################################################################
+
 
 class VectorsDrawUserData(om.MUserData):
 	_delete_after_user = True
@@ -182,29 +300,13 @@ class VectorsDrawUserData(om.MUserData):
 	def vectors_arrow_base(self):
 		return DEF_ARROW_BASE
 
-	def add_vector(self, end_point, origin_point=om.MPoint(0, 0, 0), color=om.MColor((1.0, 1.0, 1.0)),
-	               line_style=SOLID_STYLE, line_width=DEFAULT_LINE_WIDTH, show_coord=False):
-		"""
-		Adds a vector draw data which includes its origin and end points, color, line style and width as well
-		as whether its coordinates should be visible or not.
+	@property
+	def draw_data(self):
+		return self._vectors_draw_data
 
-		:param OpenMaya.MPoint end_point:
-		:param OpenMaya.MNPoint origin_point:
-		:param OpenMaya.MColor color:
-		:param int line_style:
-		:param float line_width:
-		:param bool show_coord:
-		"""
-		arrow_points = _calc_arrow_head_points(self._camera_path, self.vectors_arrow_height,
-		                                       self.vectors_arrow_base, dir_vector=end_point - origin_point,
-		                                       arrow_origin=end_point - origin_point)
-		vector_points = [origin_point, end_point]
-		for i, point in enumerate(arrow_points):
-			if i > 1:
-				vector_points.append(arrow_points[i - 1])
-			vector_points.append(point)
-
-		self._vectors_draw_data.append(VectorDrawData(vector_points, color, line_style, line_width, show_coord))
+	@draw_data.setter
+	def draw_data(self, draw_data):
+		self._vectors_draw_data = draw_data
 
 	def get_vectors_data(self):
 		return self._vectors_draw_data
@@ -223,7 +325,7 @@ class VectorsDrawUserData(om.MUserData):
 		self._delete_after_user = delete_after_use
 
 
-class VectorsVisDrawOverride(omr.MPxDrawOverride):
+class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 	_draw_apis = omr.MRenderer.kOpenGL | omr.MRenderer.kOpenGLCoreProfile | omr.MRenderer.kDirectX11
 	_obj = None
 
@@ -279,34 +381,8 @@ class VectorsVisDrawOverride(omr.MPxDrawOverride):
 		:return: The data to be passed to the draw callback method
 		:rtype: VectorsDrawUserData
 		"""
-
-		mfn_dep_node = om.MFnDependencyNode(obj_path.node())
-		in_vectors_plug = mfn_dep_node.findPlug(VectorsVis.in_vectors_data_attr, False)
-		line_width = mfn_dep_node.findPlug("lineWidth", False).asDouble()
-		start_point = om.MPoint(0.0, 0.0, 0.0)
 		vectors_draw_data = VectorsDrawUserData(camera_path)
-
-		for vector_id in range(in_vectors_plug.numElements()):
-			vector_data_plug = in_vectors_plug.elementByLogicalIndex(vector_id)
-			visible_plug = vector_data_plug.child(4)
-			if not visible_plug.asBool():
-				continue
-
-			end_plug = vector_data_plug.child(0)
-			color_plug = vector_data_plug.child(1)
-			line_style = vector_data_plug.child(2).asShort()
-			coord_vis = vector_data_plug.child(3).asBool()
-			end_point = om.MPoint(end_plug.child(0).asDouble(),
-			                      end_plug.child(1).asDouble(),
-			                      end_plug.child(2).asDouble())
-			color = om.MColor()
-			color.r = color_plug.child(0).asFloat()
-			color.g = color_plug.child(1).asFloat()
-			color.b = color_plug.child(2).asFloat()
-
-			vectors_draw_data.add_vector(end_point, origin_point=start_point, color=color,
-			                             line_width=line_width, line_style=line_style,
-			                             show_coord=coord_vis)
+		vectors_draw_data.draw_data = [draw_data for draw_data in self.read_vectors_draw_data(obj_path, camera_path)]
 
 		return vectors_draw_data
 
@@ -329,7 +405,7 @@ class VectorsVisDrawOverride(omr.MPxDrawOverride):
 		draw_manager.beginDrawable()
 		draw_2d = False
 
-		for vector_data in data.get_vectors_data():
+		for vector_data in data.draw_data:
 			draw_manager.setLineWidth(vector_data.line_width)
 			draw_manager.setLineStyle(vector_data.line_style)
 			draw_manager.setColor(vector_data.color)
@@ -337,9 +413,7 @@ class VectorsVisDrawOverride(omr.MPxDrawOverride):
 
 			if vector_data.show_coord:
 				end_point = vector_data.points[1]
-				trunc_coord = [math.trunc(c * 100) / 100 for c in (end_point.x, end_point.y, end_point.z)]
-				coord_text = "({}, {}, {})".format(*trunc_coord)
-				draw_manager.text(end_point, coord_text, dynamic=True)
+				draw_manager.text(end_point, self.coordinates_to_text(end_point), dynamic=True)
 
 		draw_manager.endDrawable()
 		return self
