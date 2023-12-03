@@ -19,6 +19,10 @@ VectorDrawData = namedtuple("VectorDrawData", ['points', 'color', 'line_style', 
 
 
 class VectorsVisMixIn(object):
+	basis_vectors = [om.MVector(1.0, 0.0, 0.0),
+	                 om.MVector(0.0, 1.0, 0.0),
+	                 om.MVector(0.0, 0.0, 1.0)]
+
 	def __init__(self, *args, **kwargs):
 		super(VectorsVisMixIn, self).__init__(*args, **kwargs)
 
@@ -115,11 +119,15 @@ class VectorsVisMixIn(object):
 
 			yield VectorDrawData(vector_points, color, line_style, line_width, coord_vis)
 
+	def calc_basis_vectors(self, vector_vis_shape_path, camera_path):
+		for base_vector, color in zip(self.basis_vectors, COMPS_COLORS):
+			yield VectorDrawData([om.MPoint(0, 0, 0), om.MPoint(base_vector)], color, SOLID_STYLE, DEFAULT_LINE_WIDTH, True)
+
 	@staticmethod
 	def coordinates_to_text(point):
 		"""
 
-		:param OpenMaya.MPoint point:
+		:param OpenMaya.MPoint|OpenMaya.MVector point:
 		:return:
 		:rtype: str
 		"""
@@ -139,6 +147,11 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	coords_visible_attr = None
 	line_style_attr = None
 	visible_attr = None
+	basis_visible_attr = None
+	base1_attr = None
+	base2_attr = None
+	base3_attr = None
+	upd_parent_matrix_attr = None
 
 	def __init_(self):
 		super(VectorsVis, self).__init__()
@@ -148,6 +161,14 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr = om.MFnNumericAttribute()
 		mfn_enum_attr = om.MFnEnumAttribute()
 		mfn_comp_attr = om.MFnCompoundAttribute()
+		mfn_matrix_attr = om.MFnMatrixAttribute()
+
+		VectorsVis.upd_parent_matrix_attr = mfn_matrix_attr.create("offMatrix", "offMatrix", om.MFnMatrixAttribute.kDouble)
+		mfn_matrix_attr.storable = False
+		mfn_matrix_attr.writable = True
+		mfn_matrix_attr.keyable = False
+		mfn_matrix_attr.default = om.MMatrix().setToIdentity()
+		mfn_matrix_attr.affectsAppearance = True
 
 		VectorsVis.line_width_attr = mfn_num_attr.create("width", "lineWidth", om.MFnNumericData.kDouble)
 		mfn_num_attr.storable = True
@@ -155,6 +176,15 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr.keyable = False
 		mfn_num_attr.default = DEFAULT_LINE_WIDTH
 		mfn_num_attr.affectsAppearance = True
+
+		VectorsVis.basis_visible_attr = mfn_enum_attr.create("basis", "showBasis")
+		mfn_enum_attr.addField("False", 0)
+		mfn_enum_attr.addField("True", 1)
+		mfn_enum_attr.writable = True
+		mfn_enum_attr.storable = True
+		mfn_enum_attr.keyable = False
+		mfn_enum_attr.default = 0
+		mfn_enum_attr.affectsAppearance = True
 
 		VectorsVis.end_attr = mfn_num_attr.createPoint("end", "endPoint")
 		mfn_num_attr.writable = True
@@ -206,8 +236,35 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_comp_attr.writable = True
 		mfn_comp_attr.affectsAppearance = True
 
+		VectorsVis.base1_attr = mfn_num_attr.createPoint("base1", "base1")
+		mfn_num_attr.writable = False
+		mfn_num_attr.storable = False
+		mfn_num_attr.keyable = False
+		mfn_num_attr.default = (VectorsVis.basis_vectors[0].x, VectorsVis.basis_vectors[0].y, VectorsVis.basis_vectors[0].z)
+
+		VectorsVis.base2_attr = mfn_num_attr.createPoint("base2", "base2")
+		mfn_num_attr.writable = False
+		mfn_num_attr.storable = False
+		mfn_num_attr.keyable = False
+		mfn_num_attr.default = (VectorsVis.basis_vectors[1].x, VectorsVis.basis_vectors[1].y, VectorsVis.basis_vectors[1].z)
+
+		VectorsVis.base3_attr = mfn_num_attr.createPoint("base3", "base3")
+		mfn_num_attr.writable = False
+		mfn_num_attr.storable = False
+		mfn_num_attr.keyable = False
+		mfn_num_attr.default = (VectorsVis.basis_vectors[2].x, VectorsVis.basis_vectors[2].y, VectorsVis.basis_vectors[2].z)
+
 		VectorsVis.addAttribute(VectorsVis.line_width_attr)
+		VectorsVis.addAttribute(VectorsVis.basis_visible_attr)
+		VectorsVis.addAttribute(VectorsVis.upd_parent_matrix_attr)
 		VectorsVis.addAttribute(VectorsVis.in_vectors_data_attr)
+		VectorsVis.addAttribute(VectorsVis.base1_attr)
+		VectorsVis.addAttribute(VectorsVis.base2_attr)
+		VectorsVis.addAttribute(VectorsVis.base3_attr)
+
+		VectorsVis.attributeAffects(VectorsVis.upd_parent_matrix_attr, VectorsVis.base1_attr)
+		VectorsVis.attributeAffects(VectorsVis.upd_parent_matrix_attr, VectorsVis.base2_attr)
+		VectorsVis.attributeAffects(VectorsVis.upd_parent_matrix_attr, VectorsVis.base3_attr)
 
 	@classmethod
 	def creator(cls):
@@ -220,8 +277,36 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		:param OpenMaya.MDataBlock data_block:
 		:return:
 		"""
+		print(">> Computing {}".format(plug.name()))
+		if plug.isChild:
+			parent_plug = om.MPlug(plug.parent())
+		else:
+			parent_plug = plug
+
+		if parent_plug.attribute() == self.base1_attr:
+			base_vector = self.basis_vectors[0]
+		elif parent_plug.attribute() == self.base2_attr:
+			base_vector = self.basis_vectors[1]
+		elif parent_plug.attribute() == self.base3_attr:
+			base_vector = self.basis_vectors[2]
+		else:
+			data_block.setClean(plug)
+			return
+
+		node_parent_local_matrix = data_block.inputValue(self.upd_parent_matrix_attr).asMatrix()
+		base_vector_cp = om.MVector(base_vector)
+		base_vector_cp *= node_parent_local_matrix
+
+		plug_data_handle = data_block.outputValue(plug)
+		if parent_plug == plug:
+			plug_data_handle.set3Float(base_vector_cp.x, base_vector_cp.y, base_vector_cp.z)
+		else:
+			for child_index in range(3):
+				if parent_plug.child(child_index) == plug:
+					plug_data_handle.setFloat(base_vector[child_index])
+					break
+
 		data_block.setClean(plug)
-		return
 
 	def draw(self, view, path, style, status):
 		"""
@@ -236,6 +321,8 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		shape_path = om.MDagPath(path).extendToShape()
 		view_camera_path = view.getCamera()
 		vectors_draw_data = self.read_vectors_draw_data(shape_path, view_camera_path)
+		draw_base_vectors = om.MFnDagNode(shape_path).findPlug(VectorsVis.basis_visible_attr, False).asBool()
+		base_vectors_draw_data = self.calc_basis_vectors(shape_path, view_camera_path) if draw_base_vectors else []
 
 		# Drawing in VP1 views will be done using V1 Python APIs
 		import maya.OpenMayaRender as v1omr
@@ -249,6 +336,27 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 
 		# Start drawing the vectors' lines
 		for draw_data in vectors_draw_data:
+			color = draw_data.color
+			gl_ft.glColor4f(color.r, color.g, color.b, 1.0)
+			gl_ft.glLineWidth(draw_data.line_width)
+
+			# Start drawing the vector's lines
+			gl_ft.glBegin(v1omr.MGL_LINES)
+
+			for i in range(0, len(draw_data.points), 2):
+				start_point = draw_data.points[i]
+				end_point = draw_data.points[i + 1]
+				gl_ft.glVertex3f(start_point.x, start_point.y, start_point.z)
+				gl_ft.glVertex3f(end_point.x, end_point.y, end_point.z)
+
+			# End drawing the vector's lines
+			gl_ft.glEnd()
+
+			if draw_data.show_coord:
+				end_point = draw_data.points[1]
+				view.drawText(self.coordinates_to_text(end_point), end_point)
+
+		for draw_data in base_vectors_draw_data:
 			color = draw_data.color
 			gl_ft.glColor4f(color.r, color.g, color.b, 1.0)
 			gl_ft.glLineWidth(draw_data.line_width)
@@ -286,35 +394,104 @@ class VectorsDrawUserData(om.MUserData):
 	_delete_after_user = True
 	_camera_path = None
 	_vectors_draw_data = None
+	_basis_vectors = None
 
 	def __init__(self, camera_path):
+		"""
+
+		:param OpenMaya.MDagPath camera_path:
+		"""
 		super(VectorsDrawUserData, self).__init__()
 		self._camera_path = camera_path
 		self._vectors_draw_data = []
+		self._basis_vectors = []
+
+	def __eq__(self, other):
+		if not type(other) == VectorsDrawUserData:
+			return False
+
+		if other.camera_path == self.camera_path and other.draw_data == self.draw_data and other.base_vectors == self.base_vectors:
+			return True
+		else:
+			return False
 
 	@property
 	def vectors_arrow_height(self):
+		"""
+
+		:rtype: float
+		"""
 		return DEF_ARROW_HEIGHT
 
 	@property
 	def vectors_arrow_base(self):
+		"""
+
+		:rtype: float
+		"""
 		return DEF_ARROW_BASE
 
 	@property
 	def draw_data(self):
+		"""
+
+		:rtype list[VectorDrawData,]:
+		"""
 		return self._vectors_draw_data
 
-	@draw_data.setter
-	def draw_data(self, draw_data):
-		self._vectors_draw_data = draw_data
+	@property
+	def base_vectors(self):
+		"""
 
-	def get_vectors_data(self):
-		return self._vectors_draw_data
+		:rtype list[VectorDrawData,]:
+		"""
+		return self._basis_vectors
+
+	@property
+	def camera_path(self):
+		"""
+
+		:rtype OpenMaya.MDagPath
+		"""
+		return self._camera_path
+
+	@camera_path.setter
+	def camera_path(self, camera_path):
+		"""
+
+		:param OpenMaya.MDagPath camera_path:
+		"""
+		self._camera_path = camera_path
+
+	def add_vector_draw_data(self, draw_data):
+		"""
+
+		:param VectorDrawData draw_data:
+		"""
+
+		if not type(draw_data) == VectorDrawData:
+			raise TypeError("Expected VectorDrawData. Got {}, instead".format(type(draw_data)))
+
+		self._vectors_draw_data.append(draw_data)
+
+	def add_base_vector_draw_data(self, draw_data):
+		"""
+
+		:param VectorDrawData draw_data:
+		"""
+		if not type(draw_data) == VectorDrawData:
+			raise TypeError("Expected VectorDrawData. Got {}, instead".format(type(draw_data)))
+
+		self._basis_vectors.append(draw_data)
 
 	def clear_draw_data(self):
 		self._vectors_draw_data = []
 
 	def deleteAfterUser(self):
+		"""
+
+		:rtype: bool
+		"""
 		return self._delete_after_user
 
 	def setDeleteAfterUser(self, delete_after_use):
@@ -328,6 +505,7 @@ class VectorsDrawUserData(om.MUserData):
 class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 	_draw_apis = omr.MRenderer.kOpenGL | omr.MRenderer.kOpenGLCoreProfile | omr.MRenderer.kDirectX11
 	_obj = None
+	_old_draw_data = None
 
 	def __init__(self, obj, callback=None, always_dirty=True):
 		"""
@@ -341,6 +519,7 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 
 		self._obj = obj
 		self._in_vectors = []
+		self._old_draw_data = None
 
 	@staticmethod
 	def creator(obj, *args, **kwargs):
@@ -381,8 +560,16 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		:return: The data to be passed to the draw callback method
 		:rtype: VectorsDrawUserData
 		"""
+		mfn_dep_node = om.MFnDependencyNode(obj_path.node())
+		show_base_vectors = mfn_dep_node.findPlug(VectorsVis.basis_visible_attr, False).asBool()
+
 		vectors_draw_data = VectorsDrawUserData(camera_path)
-		vectors_draw_data.draw_data = [draw_data for draw_data in self.read_vectors_draw_data(obj_path, camera_path)]
+		for draw_data in self.read_vectors_draw_data(obj_path, camera_path):
+			vectors_draw_data.add_vector_draw_data(draw_data)
+
+		if show_base_vectors:
+			for draw_data in self.calc_basis_vectors(obj_path, camera_path):
+				vectors_draw_data.add_base_vector_draw_data(draw_data)
 
 		return vectors_draw_data
 
@@ -399,9 +586,6 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		:param OpenMayaRender.MFrameContext frame_context:
 		:param VectorsDrawUserData data:
 		"""
-		if data is None:
-			return
-
 		draw_manager.beginDrawable()
 		draw_2d = False
 
@@ -412,8 +596,23 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 			draw_manager.lineList(om.MPointArray(vector_data.points), draw_2d)
 
 			if vector_data.show_coord:
-				end_point = vector_data.points[1]
-				draw_manager.text(end_point, self.coordinates_to_text(end_point), dynamic=True)
+				end_vector_cp = vector_data.points[1]
+				draw_manager.text(end_vector_cp, self.coordinates_to_text(end_vector_cp), dynamic=True)
+
+		if data.base_vectors:
+			obj_parent_local_matrix = om.MFnDagNode(obj_path.transform()).transformationMatrix()
+			obj_parent_local_transformation_matrix = om.MTransformationMatrix(obj_parent_local_matrix)
+
+			for draw_data in data.base_vectors:
+				draw_manager.setLineWidth(draw_data.line_width)
+				draw_manager.setLineStyle(draw_data.line_style)
+				draw_manager.setColor(draw_data.color)
+				draw_manager.lineList(om.MPointArray(draw_data.points), draw_2d)
+
+				end_vector_cp = om.MVector(draw_data.points[1])
+				#end_vector_cp *= obj_parent_local_transformation_matrix.asMatrix()
+				#end_vector_cp += obj_parent_local_transformation_matrix.translation(om.MSpace.kTransform)
+				draw_manager.text(draw_data.points[1], self.coordinates_to_text(end_vector_cp), dynamic=True)
 
 		draw_manager.endDrawable()
 		return self
