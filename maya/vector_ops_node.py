@@ -22,43 +22,87 @@ def _coordinates_to_text(point):
 	"""
 
 	:param OpenMaya.MPoint|OpenMaya.MVector point:
-	:return:
+	:return: Point's coordinates in the format "(x.xxx, x.xxx, x.xxx)".
 	:rtype: str
 	"""
 	trunc_coord = [math.trunc(c * 100) / 100 for c in (point.x, point.y, point.z)]
 	return "({}, {}, {})".format(*trunc_coord)
 
 
-def _draw_from_vector_draw_data(draw_data, view, gl_ft, text=None):
+def _build_vector_vis_draw_data(end_point, camera_path, arrow_head_scale=1.0, parent_matrix=None, color=None,
+                                line_style=SOLID_STYLE, line_width=DEFAULT_LINE_WIDTH, show_coords=False):
 	"""
+	Builds a vector visualisation data (VectorDrawData) from an end point.
 
-	:param VectorDrawData draw_data:
-	:param OpenMayaUI.M3dView view:
-	:param gl_ft:
-	:param str text:
+	:param OpenMaya.MPoint end_point:
+	:param OpenMaya.MDagPath camera_path:
+	:param float arrow_head_scale:
+	:param OpenMaya.MMatrix|None parent_matrix: World space matrix
+	:param OpenMaya.MColor|None color:
+	:param int line_style:
+	:param float line_width:
+	:param bool show_coords:
+	:return: Vector visualisation data (VectorDrawData)
+	:rtype: VectorDrawData
 	"""
-	# Start drawing the vectors' lines
-	color = draw_data.color
-	gl_ft.glColor4f(color.r, color.g, color.b, 1.0)
-	gl_ft.glLineWidth(draw_data.line_width)
+	camera_fn = om.MFnCamera(camera_path)
+	cam_up_vector = camera_fn.upDirection(om.MSpace.kWorld)
+	cam_view_vector = camera_fn.viewDirection(om.MSpace.kWorld)
+	cam_base_vector = cam_up_vector ^ cam_view_vector
+	start_point = om.MPoint(0.0, 0.0, 0.0)
+	if parent_matrix:
+		w_position = om.MTransformationMatrix(parent_matrix).translation(om.MSpace.kWorld)
+		arrow_origin = (om.MVector(end_point) * parent_matrix) + w_position
+		dir_vector = (end_point - start_point) * parent_matrix
+		parent_inv_matrix = parent_matrix.inverse()
+	else:
+		arrow_origin = om.MVector(end_point)
+		dir_vector = end_point - start_point
+		parent_inv_matrix = None
 
-	import maya.OpenMayaRender as v1omr
+	# Project the direction vector onto the camera's plane. Since both basis vectors of the camera's plane,
+	# cam_up_vector and cam_view_vector, are orthonormal (both have length = 1.0 and are 90 degrees
+	# apart), the projection calculation is the simplified dot product between the direction vector and
+	# each of the planes' base vectors. This will result in the projected vector's coordinates in the camera's
+	# plane's space.
+	cam_base_vector_scale = dir_vector * cam_base_vector
+	cam_up_vector_scale = dir_vector * cam_up_vector
 
-	# Start drawing the vector's lines
-	gl_ft.glBegin(v1omr.MGL_LINES)
+	# Once the projected coordinates in the plane's space are calculated, we use them to scale the plane's
+	# base vectors which will result in the projected vector's world space coordinates.
+	dir_vector_cam_plane_proy = (cam_base_vector_scale * cam_base_vector) + (cam_up_vector_scale * cam_up_vector)
 
-	for i in range(0, len(draw_data.points), 2):
-		start_point = draw_data.points[i]
-		end_point = draw_data.points[i + 1]
-		gl_ft.glVertex3f(start_point.x, start_point.y, start_point.z)
-		gl_ft.glVertex3f(end_point.x, end_point.y, end_point.z)
+	# Calculate the triangle points clock-wise starting from the top corner. By default, the triangle/arrow top
+	# corner point will be the world's center, which leaves the other two below the grid and the resulting triangle
+	# pointing towards the world's Y axis. It will have to be oriented based on the direction vector received as
+	# argument.
+	quats = cam_up_vector.rotateTo(dir_vector_cam_plane_proy)
+	or_cam_up_vector = cam_up_vector.rotateBy(quats)
+	or_cam_base_vector = cam_base_vector.rotateBy(quats)
+	arrow_local_coord = [
+		(0, 0),
+		(DEF_ARROW_BASE * 0.5 * arrow_head_scale, DEF_ARROW_HEIGHT * -1.0 * arrow_head_scale),
+		(DEF_ARROW_BASE * -0.5 * arrow_head_scale, DEF_ARROW_HEIGHT * -1.0 * arrow_head_scale),
+		(0, 0)
+	]
 
-	# End drawing the vector's lines
-	gl_ft.glEnd()
+	draw_points = [start_point, end_point]
+	for i, local_coord in enumerate(arrow_local_coord):
+		if i > 1:
+			draw_points.append(om.MPoint(draw_points[-1]))
 
-	if text:
-		end_point = draw_data.points[1]
-		view.drawText(text, end_point)
+		base_vector_scale, up_vector_scale = local_coord
+		scaled_up_vector = up_vector_scale * or_cam_up_vector
+		scaled_base_vector = base_vector_scale * or_cam_base_vector
+		arrow_point = om.MPoint(scaled_up_vector + scaled_base_vector + arrow_origin)
+
+		# Transform the arrow points from world space coordinates to the matrix
+		if parent_inv_matrix:
+			arrow_point *= parent_inv_matrix
+
+		draw_points.append(arrow_point)
+
+	return VectorDrawData(draw_points, color, line_style, line_width, show_coords)
 
 
 class VectorsVisMixIn(object):
@@ -70,67 +114,19 @@ class VectorsVisMixIn(object):
 		super(VectorsVisMixIn, self).__init__(*args, **kwargs)
 
 	@staticmethod
-	def _calc_arrow_head_points(camera_path, height=DEF_ARROW_HEIGHT, base=DEF_ARROW_BASE, dir_vector=None,
-	                            arrow_origin=None):
-		"""
-		Calculates arrow head points projected on a camera's plane of view.
-
-		:param OpenMaya.MDagPath camera_path:
-		:param float height:
-		:param float base:
-		:param OpenMaya.MVector dir_vector:
-		:param OpenMaya.MPoint|OpenMaya.MVector arrow_origin:
-		:return: list[OpenMaya.MPoint, OpenMaya.MPoint, OpenMaya.MPoint, OpenMaya.MPoint]
-		"""
-		camera_fn = om.MFnCamera(camera_path)
-		cam_up_vector = camera_fn.upDirection(om.MSpace.kWorld)
-		cam_view_vector = camera_fn.viewDirection(om.MSpace.kWorld)
-		cam_base_vector = cam_up_vector ^ cam_view_vector
-		if dir_vector:
-			# Project the vector onto the camera's plane. Since both basis vectors of the camera's plane,
-			# cam_up_vector and cam_view_vector, are orthonormal (both have length = 1.0 and are 90 degrees
-			# apart), the projection calculation is simplified dot product between the direction vector and
-			# each of the basis vectors. The projection vector will then be on the space of the camera's plane,
-			# which is 2 dimensional. We'll associate the x, and y components with the cam_base_vector and
-			# cam_up_vector, respectively. Therefore, the z component represents the plane's normal (cam_view_vector).
-			dir_vector_in_cam_plane = ((dir_vector * cam_base_vector) * cam_base_vector) + (
-					(dir_vector * cam_up_vector) * cam_up_vector)
-		else:
-			dir_vector_in_cam_plane = om.MVector(cam_up_vector)
-
-		arrow_origin = om.MVector(arrow_origin) if arrow_origin else om.MVector()
-		# Calculate the triangle points clock-wise starting from the top corner. By default, the triangle/arrow top
-		# corner point will be the world's center, which leaves the other two below the grid and the resulting triangle
-		# pointing towards the world's Y axis. It will have to be oriented based on the direction vector received as
-		# argument.
-		quats = cam_up_vector.rotateTo(dir_vector_in_cam_plane)
-		or_cam_up_vector = cam_up_vector.rotateBy(quats)
-		or_cam_base_vector = cam_base_vector.rotateBy(quats)
-		triangle_points = [om.MPoint(om.MVector(0.0, 0.0, 0.0) + arrow_origin),
-		                   om.MPoint((base * 0.5 * or_cam_base_vector) + (height * -1.0 * or_cam_up_vector) +
-		                             arrow_origin),
-		                   om.MPoint(
-			                   (base * -0.5 * or_cam_base_vector) + (height * -1.0 * or_cam_up_vector) + arrow_origin),
-		                   om.MPoint(om.MVector(0.0, 0.0, 0.0) + arrow_origin)]
-
-		return triangle_points
-
-	def read_vectors_draw_data(self, vector_vis_shape_path, camera_path):
+	def get_vectors_draw_data_from_shape(vector_vis_shape_path, camera_path):
 		"""
 
-		:param OpenMaya.MDagPath vector_vis_shape_path:
-		:param OpenMaya.MDagPath camera_path:
+		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
+		:param OpenMaya.MDagPath camera_path: Path to current camera
 		:return:
 		:rtype: iter(VectorDrawData)
 		"""
-		w_trans_matrix = om.MTransformationMatrix(vector_vis_shape_path.exclusiveMatrix())
-		w_inv_matrix = w_trans_matrix.asMatrixInverse()
-		w_orient_quat = w_trans_matrix.rotation(asQuaternion=True)
-		w_pos_vector = w_trans_matrix.translation(om.MSpace.kWorld)
+		w_trans_matrix = vector_vis_shape_path.exclusiveMatrix()
 		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
 		in_vectors_plug = mfn_dep_node.findPlug(VectorsVis.in_vectors_data_attr, False)
-		line_width = mfn_dep_node.findPlug("lineWidth", False).asDouble()
-		start_point = om.MPoint(0.0, 0.0, 0.0)
+		line_width = mfn_dep_node.findPlug(VectorsVis.line_width_attr, False).asDouble()
+		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
 
 		for vector_id in range(in_vectors_plug.numElements()):
 			vector_data_plug = in_vectors_plug.elementByLogicalIndex(vector_id)
@@ -150,22 +146,26 @@ class VectorsVisMixIn(object):
 			color.g = color_plug.child(1).asFloat()
 			color.b = color_plug.child(2).asFloat()
 
-			vector_points = [start_point, end_point]
-			arrow_dir_vector = (end_point - start_point) * w_trans_matrix.asMatrix()
-			arrow_origin = w_pos_vector + arrow_dir_vector
-			arrow_points = self._calc_arrow_head_points(camera_path, dir_vector=arrow_dir_vector,
-			                                            arrow_origin=arrow_origin)
-			for i, point in enumerate(arrow_points):
-				if i > 1:
-					vector_points.append(arrow_points[i - 1] * w_inv_matrix)
-				vector_points.append(point * w_inv_matrix)
+			yield _build_vector_vis_draw_data(end_point, camera_path, arrow_head_scale=arrow_head_scale,
+			                                  parent_matrix=w_trans_matrix, color=color, line_style=line_style,
+			                                  line_width=line_width, show_coords=coord_vis)
 
-			yield VectorDrawData(vector_points, color, line_style, line_width, coord_vis)
+	def get_base_vectors_from_shape(self, vector_vis_shape_path, camera_path):
+		"""
 
-	def calc_basis_vectors(self, vector_vis_shape_path, camera_path):
+		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
+		:param OpenMaya.MDagPath camera_path: Path to current camera
+		:return:
+		:rtype: iter(VectorDrawData)
+		"""
+		w_trans_matrix = vector_vis_shape_path.exclusiveMatrix()
+		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
+		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
+
 		for base_vector, color in zip(self.basis_vectors, COMPS_COLORS):
-			yield VectorDrawData([om.MPoint(0, 0, 0), om.MPoint(base_vector)], color, SOLID_STYLE,
-			                     DEFAULT_LINE_WIDTH, True)
+			yield _build_vector_vis_draw_data(om.MPoint(base_vector), camera_path, arrow_head_scale=arrow_head_scale,
+			                                  parent_matrix=w_trans_matrix, color=color, line_style=SOLID_STYLE,
+			                                  line_width=DEFAULT_LINE_WIDTH, show_coords=True)
 
 
 class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
@@ -178,6 +178,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	end_attr = None
 	color_attr = None
 	coords_visible_attr = None
+	arrow_head_size_attr = None
 	line_style_attr = None
 	visible_attr = None
 	basis_visible_attr = None
@@ -188,6 +189,38 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 
 	def __init_(self):
 		super(VectorsVis, self).__init__()
+
+	@staticmethod
+	def _draw_from_vector_draw_data(draw_data, view, gl_ft, text=None):
+		"""
+
+		:param VectorDrawData draw_data:
+		:param OpenMayaUI.M3dView view:
+		:param gl_ft:
+		:param str text:
+		"""
+		# Start drawing the vectors' lines
+		color = draw_data.color
+		gl_ft.glColor4f(color.r, color.g, color.b, 1.0)
+		gl_ft.glLineWidth(draw_data.line_width)
+
+		import maya.OpenMayaRender as v1omr
+
+		# Start drawing the vector's lines
+		gl_ft.glBegin(v1omr.MGL_LINES)
+
+		for i in range(0, len(draw_data.points), 2):
+			start_point = draw_data.points[i]
+			end_point = draw_data.points[i + 1]
+			gl_ft.glVertex3f(start_point.x, start_point.y, start_point.z)
+			gl_ft.glVertex3f(end_point.x, end_point.y, end_point.z)
+
+		# End drawing the vector's lines
+		gl_ft.glEnd()
+
+		if text:
+			end_point = draw_data.points[1]
+			view.drawText(text, end_point)
 
 	@staticmethod
 	def initialize():
@@ -209,6 +242,13 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr.writable = True
 		mfn_num_attr.keyable = False
 		mfn_num_attr.default = DEFAULT_LINE_WIDTH
+		mfn_num_attr.affectsAppearance = True
+
+		VectorsVis.arrow_head_size_attr = mfn_num_attr.create("arrowSize", "arrowHeadSize", om.MFnNumericData.kDouble)
+		mfn_num_attr.storable = True
+		mfn_num_attr.writable = True
+		mfn_num_attr.keyable = False
+		mfn_num_attr.default = 1.0
 		mfn_num_attr.affectsAppearance = True
 
 		VectorsVis.basis_visible_attr = mfn_enum_attr.create("basis", "showBasis")
@@ -292,6 +332,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		                        VectorsVis.basis_vectors[2].z)
 
 		VectorsVis.addAttribute(VectorsVis.line_width_attr)
+		VectorsVis.addAttribute(VectorsVis.arrow_head_size_attr)
 		VectorsVis.addAttribute(VectorsVis.basis_visible_attr)
 		VectorsVis.addAttribute(VectorsVis.upd_parent_matrix_attr)
 		VectorsVis.addAttribute(VectorsVis.in_vectors_data_attr)
@@ -355,9 +396,12 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		"""
 		shape_path = om.MDagPath(path).extendToShape()
 		view_camera_path = view.getCamera()
-		vectors_draw_data = self.read_vectors_draw_data(shape_path, view_camera_path)
+		vectors_draw_data = self.get_vectors_draw_data_from_shape(shape_path, view_camera_path)
 		draw_base_vectors = om.MFnDagNode(shape_path).findPlug(VectorsVis.basis_visible_attr, False).asBool()
-		base_vectors_draw_data = self.calc_basis_vectors(shape_path, view_camera_path) if draw_base_vectors else []
+		if draw_base_vectors:
+			base_vectors_draw_data = self.get_base_vectors_from_shape(shape_path, view_camera_path)
+		else:
+			base_vectors_draw_data = None
 
 		# Drawing in VP1 views will be done using V1 Python APIs
 		import maya.OpenMayaRender as v1omr
@@ -377,11 +421,11 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			else:
 				text = None
 
-			_draw_from_vector_draw_data(draw_data, view, gl_ft, text=text)
+			self._draw_from_vector_draw_data(draw_data, view, gl_ft, text=text)
 
 		if base_vectors_draw_data:
 			for draw_data, axis in zip(base_vectors_draw_data, ['x', 'y', 'z']):
-				_draw_from_vector_draw_data(draw_data, view, gl_ft, text=axis)
+				self._draw_from_vector_draw_data(draw_data, view, gl_ft, text=axis)
 
 		# Restore the state
 		gl_ft.glPopAttrib()
@@ -570,11 +614,11 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		show_base_vectors = mfn_dep_node.findPlug(VectorsVis.basis_visible_attr, False).asBool()
 
 		vectors_draw_data = VectorsDrawUserData(camera_path)
-		for draw_data in self.read_vectors_draw_data(obj_path, camera_path):
+		for draw_data in self.get_vectors_draw_data_from_shape(obj_path, camera_path):
 			vectors_draw_data.add_vector_draw_data(draw_data)
 
 		if show_base_vectors:
-			for draw_data in self.calc_basis_vectors(obj_path, camera_path):
+			for draw_data in self.get_base_vectors_from_shape(obj_path, camera_path):
 				vectors_draw_data.add_base_vector_draw_data(draw_data)
 
 		return vectors_draw_data
