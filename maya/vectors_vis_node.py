@@ -15,7 +15,9 @@ COMPS_COLORS = (om.MColor((1.0, 0.0, 0.0)),
                 om.MColor((0.0, 0.0, 1.0)))
 DEF_ARROW_HEIGHT = 0.4
 DEF_ARROW_BASE = 0.3
-VectorDrawData = namedtuple("VectorDrawData", ['points', 'color', 'line_style', 'line_width', 'show_coord'])
+VectorDrawData = namedtuple("VectorDrawData", ['label', 'points', 'color', 'line_style', 'line_width', 'show_coord'])
+DEFAULT_VECTOR_LABEL = "v"
+DEF_DETAIL_FONT_SIZE = omr.MUIDrawManager.kDefaultFontSize
 
 
 def _coordinates_to_text(point):
@@ -29,13 +31,15 @@ def _coordinates_to_text(point):
 	return "({}, {}, {})".format(*trunc_coord)
 
 
-def _build_vector_vis_draw_data(end_point, camera_path, arrow_head_scale=1.0, parent_matrix=None, color=None,
-                                line_style=SOLID_STYLE, line_width=DEFAULT_LINE_WIDTH, show_coords=False):
+def _build_vector_vis_draw_data(end_point, camera_path, label=DEFAULT_VECTOR_LABEL, arrow_head_scale=1.0,
+                                parent_matrix=None, color=None, line_style=SOLID_STYLE, line_width=DEFAULT_LINE_WIDTH,
+                                show_coords=False):
 	"""
 	Builds a vector visualisation data (VectorDrawData) from an end point.
 
 	:param OpenMaya.MPoint end_point:
 	:param OpenMaya.MDagPath camera_path:
+	:param str label:
 	:param float arrow_head_scale:
 	:param OpenMaya.MMatrix|None parent_matrix: World space matrix
 	:param OpenMaya.MColor|None color:
@@ -102,42 +106,40 @@ def _build_vector_vis_draw_data(end_point, camera_path, arrow_head_scale=1.0, pa
 
 		draw_points.append(arrow_point)
 
-	return VectorDrawData(draw_points, color, line_style, line_width, show_coords)
+	return VectorDrawData(label, draw_points, color, line_style, line_width, show_coords)
 
 
 class VectorsVisMixIn(object):
 	basis_vectors = [om.MVector(1.0, 0.0, 0.0),
 	                 om.MVector(0.0, 1.0, 0.0),
 	                 om.MVector(0.0, 0.0, 1.0)]
+	basis_labels = ['x', 'y', 'z']
 
 	def __init__(self, *args, **kwargs):
 		super(VectorsVisMixIn, self).__init__(*args, **kwargs)
 
 	@staticmethod
-	def get_vectors_draw_data_from_shape(vector_vis_shape_path, camera_path):
+	def get_vectors_data(vector_vis_shape_path):
 		"""
 
 		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
-		:param OpenMaya.MDagPath camera_path: Path to current camera
 		:return:
-		:rtype: iter(VectorDrawData)
+		:rtype: iter(tuple(str, OpenMaya.MPoint, OpenMaya.MColor, int, bool),)
 		"""
-		w_trans_matrix = vector_vis_shape_path.exclusiveMatrix()
 		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
 		in_vectors_plug = mfn_dep_node.findPlug(VectorsVis.in_vectors_data_attr, False)
-		line_width = mfn_dep_node.findPlug(VectorsVis.line_width_attr, False).asDouble()
-		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
 
 		for vector_id in range(in_vectors_plug.numElements()):
 			vector_data_plug = in_vectors_plug.elementByLogicalIndex(vector_id)
-			visible_plug = vector_data_plug.child(4)
+			visible_plug = vector_data_plug.child(VectorsVis.visible_attr)
 			if not visible_plug.asBool():
 				continue
 
-			end_plug = vector_data_plug.child(0)
-			color_plug = vector_data_plug.child(1)
-			line_style = vector_data_plug.child(2).asShort()
-			coord_vis = vector_data_plug.child(3).asBool()
+			label = vector_data_plug.child(VectorsVis.label_attr).asString()
+			end_plug = vector_data_plug.child(VectorsVis.end_attr)
+			color_plug = vector_data_plug.child(VectorsVis.color_attr)
+			line_style = vector_data_plug.child(VectorsVis.line_style_attr).asShort()
+			coord_vis = vector_data_plug.child(VectorsVis.show_coord_attr).asBool()
 			end_point = om.MPoint(end_plug.child(0).asDouble(),
 			                      end_plug.child(1).asDouble(),
 			                      end_plug.child(2).asDouble())
@@ -146,11 +148,29 @@ class VectorsVisMixIn(object):
 			color.g = color_plug.child(1).asFloat()
 			color.b = color_plug.child(2).asFloat()
 
-			yield _build_vector_vis_draw_data(end_point, camera_path, arrow_head_scale=arrow_head_scale,
+			yield label, end_point, color, line_style, coord_vis
+
+	@classmethod
+	def get_vectors_draw_data_from_shape(cls, vector_vis_shape_path, camera_path):
+		"""
+
+		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
+		:param OpenMaya.MDagPath camera_path: Path to current camera
+		:return:
+		:rtype: iter(VectorDrawData)
+		"""
+		w_trans_matrix = vector_vis_shape_path.exclusiveMatrix()
+		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
+		line_width = mfn_dep_node.findPlug(VectorsVis.line_width_attr, False).asDouble()
+		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
+
+		for label, end_point, color, line_style, coord_vis in cls.get_vectors_data(vector_vis_shape_path):
+			yield _build_vector_vis_draw_data(end_point, camera_path, label=label, arrow_head_scale=arrow_head_scale,
 			                                  parent_matrix=w_trans_matrix, color=color, line_style=line_style,
 			                                  line_width=line_width, show_coords=coord_vis)
 
-	def get_base_vectors_from_shape(self, vector_vis_shape_path, camera_path):
+	@classmethod
+	def get_base_vectors_from_shape(cls, vector_vis_shape_path, camera_path):
 		"""
 
 		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
@@ -162,10 +182,24 @@ class VectorsVisMixIn(object):
 		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
 		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
 
-		for base_vector, color in zip(self.basis_vectors, COMPS_COLORS):
-			yield _build_vector_vis_draw_data(om.MPoint(base_vector), camera_path, arrow_head_scale=arrow_head_scale,
+		for base_vector, color, label in zip(cls.basis_vectors, COMPS_COLORS, cls.basis_labels):
+			base_point = om.MPoint(base_vector)
+			yield _build_vector_vis_draw_data(base_point, camera_path, label=label, arrow_head_scale=arrow_head_scale,
 			                                  parent_matrix=w_trans_matrix, color=color, line_style=SOLID_STYLE,
 			                                  line_width=DEFAULT_LINE_WIDTH, show_coords=True)
+
+	@staticmethod
+	def build_vector_detail(label, end_point):
+		"""
+
+		:param str label:
+		:param OpenMaya.MPoint end_point:
+		:return:
+		"rtype: str
+		"""
+		length = om.MVector(end_point).length()
+		detail = "{} = {}, |{}| = {}".format(label, _coordinates_to_text(end_point), label, length)
+		return detail
 
 
 class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
@@ -177,8 +211,13 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	in_vectors_data_attr = None
 	end_attr = None
 	color_attr = None
-	coords_visible_attr = None
+	label_attr = None
+	show_coord_attr = None
+	show_length_attr = None
+	show_label_attr = None
+	show_detailed_attr = None
 	arrow_head_size_attr = None
+	details_font_size_attr = None
 	line_style_attr = None
 	visible_attr = None
 	basis_visible_attr = None
@@ -186,6 +225,8 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	base2_attr = None
 	base3_attr = None
 	upd_parent_matrix_attr = None
+
+	kDefaultVectorLabel = "v"
 
 	def __init_(self):
 		super(VectorsVis, self).__init__()
@@ -227,11 +268,12 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr = om.MFnNumericAttribute()
 		mfn_enum_attr = om.MFnEnumAttribute()
 		mfn_comp_attr = om.MFnCompoundAttribute()
+		mfn_typed_attr = om.MFnTypedAttribute()
 		mfn_matrix_attr = om.MFnMatrixAttribute()
 
 		VectorsVis.upd_parent_matrix_attr = mfn_matrix_attr.create("inPm", "inParentMatrix",
 		                                                           om.MFnMatrixAttribute.kDouble)
-		mfn_matrix_attr.storable = False
+		mfn_matrix_attr.storable = True
 		mfn_matrix_attr.writable = True
 		mfn_matrix_attr.keyable = False
 		mfn_matrix_attr.default = om.MMatrix().setToIdentity()
@@ -260,6 +302,29 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_enum_attr.default = 0
 		mfn_enum_attr.affectsAppearance = True
 
+		VectorsVis.show_detailed_attr = mfn_enum_attr.create("detailed", "showDetailed")
+		mfn_enum_attr.addField("False", 0)
+		mfn_enum_attr.addField("True", 1)
+		mfn_enum_attr.writable = True
+		mfn_enum_attr.storable = True
+		mfn_enum_attr.keyable = False
+		mfn_enum_attr.default = 0
+		mfn_enum_attr.affectsAppearance = True
+
+		VectorsVis.details_font_size_attr = mfn_num_attr.create("detailsFontSize", "detailsFontSize",
+		                                                        om.MFnNumericData.kInt)
+		mfn_num_attr.storable = True
+		mfn_num_attr.writable = True
+		mfn_num_attr.keyable = False
+		mfn_num_attr.default = DEF_DETAIL_FONT_SIZE
+		mfn_num_attr.affectsAppearance = True
+
+		# Individual vectors' attributes
+
+		vector_label_data = om.MFnStringData().create(VectorsVis.kDefaultVectorLabel)
+		VectorsVis.label_attr = mfn_typed_attr.create("label", "vectorLabel", om.MFnData.kString, vector_label_data)
+		mfn_typed_attr.affectsAppearance = True
+
 		VectorsVis.end_attr = mfn_num_attr.createPoint("end", "endPoint")
 		mfn_num_attr.writable = True
 		mfn_num_attr.storable = True
@@ -281,7 +346,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_enum_attr.default = SOLID_STYLE
 		mfn_enum_attr.affectsAppearance = True
 
-		VectorsVis.coords_visible_attr = mfn_enum_attr.create("coord", "showCoordinates")
+		VectorsVis.show_coord_attr = mfn_enum_attr.create("coord", "showCoordinates")
 		mfn_enum_attr.addField("False", 0)
 		mfn_enum_attr.addField("True", 1)
 		mfn_enum_attr.writable = True
@@ -300,10 +365,11 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_enum_attr.affectsAppearance = True
 
 		VectorsVis.in_vectors_data_attr = mfn_comp_attr.create("inVectors", "inVectors")
+		mfn_comp_attr.addChild(VectorsVis.label_attr)
 		mfn_comp_attr.addChild(VectorsVis.end_attr)
 		mfn_comp_attr.addChild(VectorsVis.color_attr)
 		mfn_comp_attr.addChild(VectorsVis.line_style_attr)
-		mfn_comp_attr.addChild(VectorsVis.coords_visible_attr)
+		mfn_comp_attr.addChild(VectorsVis.show_coord_attr)
 		mfn_comp_attr.addChild(VectorsVis.visible_attr)
 		mfn_comp_attr.array = True
 		mfn_comp_attr.storable = True
@@ -335,6 +401,8 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		VectorsVis.addAttribute(VectorsVis.arrow_head_size_attr)
 		VectorsVis.addAttribute(VectorsVis.basis_visible_attr)
 		VectorsVis.addAttribute(VectorsVis.upd_parent_matrix_attr)
+		VectorsVis.addAttribute(VectorsVis.show_detailed_attr)
+		VectorsVis.addAttribute(VectorsVis.details_font_size_attr)
 		VectorsVis.addAttribute(VectorsVis.in_vectors_data_attr)
 		VectorsVis.addAttribute(VectorsVis.base1_attr)
 		VectorsVis.addAttribute(VectorsVis.base2_attr)
@@ -396,7 +464,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		"""
 		shape_path = om.MDagPath(path).extendToShape()
 		view_camera_path = view.getCamera()
-		vectors_draw_data = self.get_vectors_draw_data_from_shape(shape_path, view_camera_path)
+		vectors_draw_data = [d for d in self.get_vectors_draw_data_from_shape(shape_path, view_camera_path)]
 		draw_base_vectors = om.MFnDagNode(shape_path).findPlug(VectorsVis.basis_visible_attr, False).asBool()
 		if draw_base_vectors:
 			base_vectors_draw_data = self.get_base_vectors_from_shape(shape_path, view_camera_path)
@@ -427,6 +495,32 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			for draw_data, axis in zip(base_vectors_draw_data, ['x', 'y', 'z']):
 				self._draw_from_vector_draw_data(draw_data, view, gl_ft, text=axis)
 
+		show_details = om.MFnDagNode(shape_path).findPlug(VectorsVis.show_detailed_attr, False).asBool()
+		if show_details and view.displayStatus(path) in (omui.M3dView.kLead, omui.M3dView.kActive):
+			details_font_size = om.MFnDagNode(shape_path).findPlug(VectorsVis.details_font_size_attr, False).asInt()
+			active_view = view.active3dView()
+			next_line_y_position = 0
+			shape_inv_matrix = shape_path.inclusiveMatrix().inverse()
+
+			# TODO: Currently there is no support for changing the font size for the text
+
+			for vector_data in reversed(vectors_draw_data):
+				end_point = vector_data.points[1]
+				vector_detail = self.build_vector_detail(vector_data.label, end_point)
+				detail_color = vector_data.color
+				near_plane_point = om.MPoint()
+				far_plane_point = om.MPoint()
+				gl_ft.glColor4f(detail_color.r, detail_color.g, detail_color.b, 1.0)
+
+				# The method viewToWorld converts a 2d port point into a 3d world space point on the plane formed by
+				# its two point arguments: near and far clip plane. However, the drawText method expects a position
+				# in object space. Therefore, the point returned by viewToWorld has to be converted to object space
+				# in order to keep the position.
+				active_view.viewToWorld(0, next_line_y_position, near_plane_point, far_plane_point)
+				view.drawText(vector_detail, (near_plane_point * shape_inv_matrix), view.kLeft)
+
+				next_line_y_position += details_font_size + 5
+
 		# Restore the state
 		gl_ft.glPopAttrib()
 		view.endGL()
@@ -445,6 +539,8 @@ class VectorsDrawUserData(om.MUserData):
 	_camera_path = None
 	_vectors_draw_data = None
 	_basis_vectors = None
+	details = None
+	details_font_size = DEF_DETAIL_FONT_SIZE
 
 	def __init__(self, camera_path):
 		"""
@@ -612,8 +708,13 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		"""
 		mfn_dep_node = om.MFnDependencyNode(obj_path.node())
 		show_base_vectors = mfn_dep_node.findPlug(VectorsVis.basis_visible_attr, False).asBool()
+		show_details = mfn_dep_node.findPlug(VectorsVis.show_detailed_attr, False).asBool()
+		details_font_size = mfn_dep_node.findPlug(VectorsVis.details_font_size_attr, False).asInt()
 
 		vectors_draw_data = VectorsDrawUserData(camera_path)
+		vectors_draw_data.details = show_details
+		vectors_draw_data.details_font_size = details_font_size
+
 		for draw_data in self.get_vectors_draw_data_from_shape(obj_path, camera_path):
 			vectors_draw_data.add_vector_draw_data(draw_data)
 
@@ -657,6 +758,18 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 				draw_manager.lineList(om.MPointArray(draw_data.points), draw_2d)
 
 				draw_manager.text(draw_data.points[1], axis, dynamic=False)
+
+		if data.details and omui.M3dView.displayStatus(obj_path) in (omui.M3dView.kLead, omui.M3dView.kActive):
+			next_line_position = om.MPoint()
+			lines_offset_vector = om.MVector(0.0, data.details_font_size, 0.0) + om.MVector(0.0, 5.0, 0.0)
+			draw_manager.setFontSize(data.details_font_size)
+
+			for vector_data in reversed(data.draw_data):
+				end_point = vector_data.points[1]
+				vector_detail = self.build_vector_detail(vector_data.label, end_point)
+				draw_manager.setColor(vector_data.color)
+				draw_manager.text2d(next_line_position, vector_detail, dynamic=False)
+				next_line_position = om.MPoint(om.MVector(next_line_position) + lines_offset_vector)
 
 		draw_manager.endDrawable()
 		return self
