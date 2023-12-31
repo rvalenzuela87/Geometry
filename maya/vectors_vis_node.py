@@ -35,106 +35,115 @@ ALIGN_LABELS = [
 # BOTTOM_ALIGN = 10
 
 
-def _coordinates_to_text(point):
-	"""
-
-	:param OpenMaya.MPoint|OpenMaya.MVector point:
-	:return: Point's coordinates in the format "(x.xxx, x.xxx, x.xxx)".
-	:rtype: str
-	"""
-	trunc_coord = [math.trunc(c * 100) / 100 for c in (point.x, point.y, point.z)]
-	return "({}, {}, {})".format(*trunc_coord)
-
-
-def _build_vector_vis_draw_data(end_point, camera_path, label=DEFAULT_VECTOR_LABEL, arrow_head_scale=1.0,
-                                parent_matrix=None, color=None, line_style=SOLID_STYLE, line_width=DEFAULT_LINE_WIDTH,
-                                show_coords=False):
-	"""
-	Builds a vector visualisation data (VectorDrawData) from an end point.
-
-	:param OpenMaya.MPoint end_point:
-	:param OpenMaya.MDagPath camera_path:
-	:param str label:
-	:param float arrow_head_scale:
-	:param OpenMaya.MMatrix|None parent_matrix: World space matrix
-	:param OpenMaya.MColor|None color:
-	:param int line_style:
-	:param float line_width:
-	:param bool show_coords:
-	:return: Vector visualisation data (VectorDrawData)
-	:rtype: VectorDrawData
-	"""
-	camera_fn = om.MFnCamera(camera_path)
-	cam_up_vector = camera_fn.upDirection(om.MSpace.kWorld)
-	cam_view_vector = camera_fn.viewDirection(om.MSpace.kWorld)
-	cam_base_vector = cam_up_vector ^ cam_view_vector
-	start_point = om.MPoint(0.0, 0.0, 0.0)
-	if parent_matrix:
-		w_position = om.MTransformationMatrix(parent_matrix).translation(om.MSpace.kWorld)
-		arrow_origin = (om.MVector(end_point) * parent_matrix) + w_position
-		dir_vector = (end_point - start_point) * parent_matrix
-		parent_inv_matrix = parent_matrix.inverse()
-	else:
-		arrow_origin = om.MVector(end_point)
-		dir_vector = end_point - start_point
-		parent_inv_matrix = None
-
-	# Project the direction vector onto the camera's plane. Since both basis vectors of the camera's plane,
-	# cam_up_vector and cam_view_vector, are orthonormal (both have length = 1.0 and are 90 degrees
-	# apart), the projection calculation is the simplified dot product between the direction vector and
-	# each of the planes' base vectors. This will result in the projected vector's coordinates in the camera's
-	# plane's space.
-	cam_base_vector_scale = dir_vector * cam_base_vector
-	cam_up_vector_scale = dir_vector * cam_up_vector
-
-	# Once the projected coordinates in the plane's space are calculated, we use them to scale the plane's
-	# base vectors which will result in the projected vector's world space coordinates.
-	dir_vector_cam_plane_proy = (cam_base_vector_scale * cam_base_vector) + (cam_up_vector_scale * cam_up_vector)
-
-	# Calculate the triangle points clock-wise starting from the top corner. By default, the triangle/arrow top
-	# corner point will be the world's center, which leaves the other two below the grid and the resulting triangle
-	# pointing towards the world's Y axis. It will have to be oriented based on the direction vector received as
-	# argument.
-	quats = cam_up_vector.rotateTo(dir_vector_cam_plane_proy)
-	or_cam_up_vector = cam_up_vector.rotateBy(quats)
-	or_cam_base_vector = cam_base_vector.rotateBy(quats)
-	arrow_local_coord = [
-		(0, 0),
-		(DEF_ARROW_BASE * 0.5 * arrow_head_scale, DEF_ARROW_HEIGHT * -1.0 * arrow_head_scale),
-		(DEF_ARROW_BASE * -0.5 * arrow_head_scale, DEF_ARROW_HEIGHT * -1.0 * arrow_head_scale),
-		(0, 0)
-	]
-
-	draw_points = [start_point, end_point]
-	for i, local_coord in enumerate(arrow_local_coord):
-		if i > 1:
-			draw_points.append(om.MPoint(draw_points[-1]))
-
-		base_vector_scale, up_vector_scale = local_coord
-		scaled_up_vector = up_vector_scale * or_cam_up_vector
-		scaled_base_vector = base_vector_scale * or_cam_base_vector
-		arrow_point = om.MPoint(scaled_up_vector + scaled_base_vector + arrow_origin)
-
-		# Transform the arrow points from world space coordinates to the matrix
-		if parent_inv_matrix:
-			arrow_point *= parent_inv_matrix
-
-		draw_points.append(arrow_point)
-
-	return VectorDrawData(label, draw_points, color, line_style, line_width, show_coords)
-
-
 class VectorsVisMixIn(object):
-	basis_vectors = [om.MVector(1.0, 0.0, 0.0),
-	                 om.MVector(0.0, 1.0, 0.0),
-	                 om.MVector(0.0, 0.0, 1.0)]
-	basis_labels = ['x', 'y', 'z']
+	base_vectors = [om.MVector(1.0, 0.0, 0.0),
+	                om.MVector(0.0, 1.0, 0.0),
+	                om.MVector(0.0, 0.0, 1.0)]
+	base_vectors_labels = ['x', 'y', 'z']
 
 	def __init__(self, *args, **kwargs):
 		super(VectorsVisMixIn, self).__init__(*args, **kwargs)
 
 	@staticmethod
-	def get_vectors_data(vector_vis_shape_path):
+	def _coordinates_to_text(point):
+		"""
+
+		:param OpenMaya.MPoint|OpenMaya.MVector point:
+		:return: Point's coordinates in the format "(x.xxx, x.xxx, x.xxx)".
+		:rtype: str
+		"""
+		trunc_values = []
+		for _value in (point.x, point.y, point.z):
+			expected_value_length = len("{}".format(math.trunc(_value))) + 3
+			_trunc_value_str = "{}".format(math.trunc(_value * 100) / 100)
+			while len(_trunc_value_str) < expected_value_length:
+				_trunc_value_str += "0"
+
+			trunc_values.append(_trunc_value_str)
+
+		return "({}, {}, {})".format(*trunc_values)
+
+	@staticmethod
+	def _build_vector_vis_draw_data(end_point, camera_path, label=DEFAULT_VECTOR_LABEL, arrow_head_scale=1.0,
+	                                parent_matrix=None, color=None, line_style=SOLID_STYLE,
+	                                line_width=DEFAULT_LINE_WIDTH,
+	                                show_coords=False):
+		"""
+		Builds a vector visualisation data (VectorDrawData) from an end point.
+
+		:param OpenMaya.MPoint end_point:
+		:param OpenMaya.MDagPath camera_path:
+		:param str label:
+		:param float arrow_head_scale:
+		:param OpenMaya.MMatrix|None parent_matrix: World space matrix
+		:param OpenMaya.MColor|None color:
+		:param int line_style:
+		:param float line_width:
+		:param bool show_coords:
+		:return: Vector visualisation data (VectorDrawData)
+		:rtype: VectorDrawData
+		"""
+		camera_fn = om.MFnCamera(camera_path)
+		cam_up_vector = camera_fn.upDirection(om.MSpace.kWorld)
+		cam_view_vector = camera_fn.viewDirection(om.MSpace.kWorld)
+		cam_base_vector = cam_up_vector ^ cam_view_vector
+		start_point = om.MPoint(0.0, 0.0, 0.0)
+		if parent_matrix:
+			w_position = om.MTransformationMatrix(parent_matrix).translation(om.MSpace.kWorld)
+			arrow_origin = (om.MVector(end_point) * parent_matrix) + w_position
+			dir_vector = (end_point - start_point) * parent_matrix
+			parent_inv_matrix = parent_matrix.inverse()
+		else:
+			arrow_origin = om.MVector(end_point)
+			dir_vector = end_point - start_point
+			parent_inv_matrix = None
+
+		# Project the direction vector onto the camera's plane. Since both base vectors of the camera's plane,
+		# cam_up_vector and cam_view_vector, are orthonormal (both have length = 1.0 and are 90 degrees
+		# apart), the projection calculation is the simplified dot product between the direction vector and
+		# each of the planes' base vectors. This will result in the projected vector's coordinates in the camera's
+		# plane's space.
+		cam_base_vector_scale = dir_vector * cam_base_vector
+		cam_up_vector_scale = dir_vector * cam_up_vector
+
+		# Once the projected coordinates in the plane's space are calculated, we use them to scale the plane's
+		# base vectors which will result in the projected vector's world space coordinates.
+		dir_vector_cam_plane_proy = (cam_base_vector_scale * cam_base_vector) + (cam_up_vector_scale * cam_up_vector)
+
+		# Calculate the triangle points clock-wise starting from the top corner. By default, the triangle/arrow top
+		# corner point will be the world's center, which leaves the other two below the grid and the resulting triangle
+		# pointing towards the world's Y axis. It will have to be oriented based on the direction vector received as
+		# argument.
+		quats = cam_up_vector.rotateTo(dir_vector_cam_plane_proy)
+		or_cam_up_vector = cam_up_vector.rotateBy(quats)
+		or_cam_base_vector = cam_base_vector.rotateBy(quats)
+		arrow_local_coord = [
+			(0, 0),
+			(DEF_ARROW_BASE * 0.5 * arrow_head_scale, DEF_ARROW_HEIGHT * -1.0 * arrow_head_scale),
+			(DEF_ARROW_BASE * -0.5 * arrow_head_scale, DEF_ARROW_HEIGHT * -1.0 * arrow_head_scale),
+			(0, 0)
+		]
+
+		draw_points = [start_point, end_point]
+		for i, local_coord in enumerate(arrow_local_coord):
+			if i > 1:
+				draw_points.append(om.MPoint(draw_points[-1]))
+
+			base_vector_scale, up_vector_scale = local_coord
+			scaled_up_vector = up_vector_scale * or_cam_up_vector
+			scaled_base_vector = base_vector_scale * or_cam_base_vector
+			arrow_point = om.MPoint(scaled_up_vector + scaled_base_vector + arrow_origin)
+
+			# Transform the arrow points from world space coordinates to the matrix
+			if parent_inv_matrix:
+				arrow_point *= parent_inv_matrix
+
+			draw_points.append(arrow_point)
+
+		return VectorDrawData(label, draw_points, color, line_style, line_width, show_coords)
+
+	@staticmethod
+	def _extract_vectors_data_from_vector_vis_node(vector_vis_shape_path):
 		"""
 
 		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
@@ -166,7 +175,7 @@ class VectorsVisMixIn(object):
 			yield label, end_point, color, line_style, coord_vis
 
 	@classmethod
-	def get_vectors_draw_data_from_shape(cls, vector_vis_shape_path, camera_path):
+	def get_vectors_draw_data_from_vector_vis_node(cls, vector_vis_shape_path, camera_path):
 		"""
 
 		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
@@ -179,13 +188,14 @@ class VectorsVisMixIn(object):
 		line_width = mfn_dep_node.findPlug(VectorsVis.line_width_attr, False).asDouble()
 		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
 
-		for label, end_point, color, line_style, coord_vis in cls.get_vectors_data(vector_vis_shape_path):
-			yield _build_vector_vis_draw_data(end_point, camera_path, label=label, arrow_head_scale=arrow_head_scale,
-			                                  parent_matrix=w_trans_matrix, color=color, line_style=line_style,
-			                                  line_width=line_width, show_coords=coord_vis)
+		for label, end_point, color, line_style, coord_vis in cls._extract_vectors_data_from_vector_vis_node(vector_vis_shape_path):
+			yield cls._build_vector_vis_draw_data(end_point, camera_path, label=label,
+			                                      arrow_head_scale=arrow_head_scale, parent_matrix=w_trans_matrix,
+			                                      color=color, line_style=line_style, line_width=line_width,
+			                                      show_coords=coord_vis)
 
 	@classmethod
-	def get_base_vectors_from_shape(cls, vector_vis_shape_path, camera_path):
+	def get_base_vectors_draw_data_from_vector_vis_node(cls, vector_vis_shape_path, camera_path):
 		"""
 
 		:param OpenMaya.MDagPath vector_vis_shape_path: Path to vectorsVis node
@@ -197,14 +207,15 @@ class VectorsVisMixIn(object):
 		mfn_dep_node = om.MFnDependencyNode(vector_vis_shape_path.node())
 		arrow_head_scale = mfn_dep_node.findPlug(VectorsVis.arrow_head_size_attr, False).asDouble()
 
-		for base_vector, color, label in zip(cls.basis_vectors, COMPS_COLORS, cls.basis_labels):
+		for base_vector, color, label in zip(cls.base_vectors, COMPS_COLORS, cls.base_vectors_labels):
 			base_point = om.MPoint(base_vector)
-			yield _build_vector_vis_draw_data(base_point, camera_path, label=label, arrow_head_scale=arrow_head_scale,
-			                                  parent_matrix=w_trans_matrix, color=color, line_style=SOLID_STYLE,
-			                                  line_width=DEFAULT_LINE_WIDTH, show_coords=True)
+			yield cls._build_vector_vis_draw_data(base_point, camera_path, label=label,
+			                                      arrow_head_scale=arrow_head_scale, parent_matrix=w_trans_matrix,
+			                                      color=color, line_style=SOLID_STYLE, line_width=DEFAULT_LINE_WIDTH,
+			                                      show_coords=True)
 
-	@staticmethod
-	def build_vector_detail(label, end_point):
+	@classmethod
+	def build_vector_detail(cls, label, end_point):
 		"""
 
 		:param str label:
@@ -212,38 +223,92 @@ class VectorsVisMixIn(object):
 		:return:
 		"rtype: str
 		"""
-		length = math.trunc(om.MVector(end_point).length() * 100) / 100
-		detail = "{} = {}, {}".format(label, _coordinates_to_text(end_point), length)
+		# Trunc the vector's length to 2 decimal positions and add extra 0's if necessary
+		or_length = om.MVector(end_point).length()
+		expected_size = len("{}".format(math.trunc(or_length))) + 3
+		trunc_length_str = "{}".format(math.trunc(or_length * 100) / 100)
+		while len(trunc_length_str) < expected_size:
+			trunc_length_str += "0"
+
+		detail = "{} = {}, {}".format(label, cls._coordinates_to_text(end_point), trunc_length_str)
 		return detail
 
 	@staticmethod
-	def next_2d_position(alignment, lines_count=1, vertical_offset=DEF_DETAIL_FONT_SIZE):
+	def build_matrix_rows_details(matrix):
+		"""
+		
+		:param OpenMaya.MMatrix matrix:
+		:return:
+		:rtype: iter(tuple(str, OpenMaya.MColor),)
+		"""
+		columns_values = []
+		for col in range(4):
+			temp_trunc_col_values = []
+			max_length = 0
+			for row in range(4):
+				value = matrix.getElement(row, col)
+				trunc_value_str = "{}".format(math.trunc(value * 100) / 100)
+				try:
+					__, decimals = trunc_value_str.split(".")
+				except ValueError:
+					# The value has no decimals
+					trunc_value_str = "{}.00".format(trunc_value_str)
+				else:
+					if len(decimals) < 2:
+						trunc_value_str = "{}0".format(trunc_value_str)
+
+				temp_trunc_col_values.append(trunc_value_str)
+				if len(trunc_value_str) > max_length:
+					max_length = len(trunc_value_str)
+
+			trunc_col_values = []
+			for value_str in temp_trunc_col_values:
+				while len(value_str) < max_length:
+					value_str = " {}".format(value_str)
+
+				trunc_col_values.append(value_str)
+
+			columns_values.append(trunc_col_values)
+
+		row_colors_iter = iter(COMPS_COLORS)
+		for row_values in zip(*columns_values):
+			try:
+				row_color = next(row_colors_iter)
+			except StopIteration:
+				row_color = om.MColor((0.0, 0.0, 0.0))
+
+			yield " | ".join(row_values), row_color
+
+	@staticmethod
+	def text_rows_2d_drawing_coords(horizontal_align=LOW_LEFT_ALIGN, vertical_offset=DEF_DETAIL_FONT_SIZE):
 		"""
 
-		:param int alignment:
-		:param int lines_count:
+		:param int horizontal_align:
 		:param int vertical_offset:
-		:return:
-		:rtype: iter((float, float))
+		:return: The x and y 2D coordinates for drawing each line of text, based on the active viewport's resolution.
+		:rtype: iter((float, float),)
 		"""
 		active_view = omui.M3dView.active3dView()
 
 		# The viewport dimensions are returned in a list with four values. The first two correspond to the
-		# lower left corner's x and y coordinates and the last 2 to the upper right corner's.
+		# lower left corner's x and y coordinates whereas the last two correspond to the upper right corner.
 		viewport_dimensions = active_view.viewport()
-		text_x_pos = viewport_dimensions[0] if alignment in [LOW_LEFT_ALIGN, UP_LEFT_ALIGN] else viewport_dimensions[2]
+		text_x_pos = viewport_dimensions[0] if horizontal_align in [LOW_LEFT_ALIGN, UP_LEFT_ALIGN] else viewport_dimensions[2]
 		# TODO: If the text is set to one of the top corners, the font's height has to be removed from the top
-		#  corner's y value. Otherwise, the first line of text will not be visible. For the time being, we'll
-		#  use the vertical offset instead of the font's actual height.
-		if alignment in [UP_LEFT_ALIGN, UP_RIGHT_ALIGN]:
+		#  corner's y value. Otherwise, the first line of text will not be visible because the text is always drawn
+		#  above the point given and there is no way to set its alignment unlike the horizontal alignment. For the
+		#  time being, we'll use the vertical offset instead of the font's actual height.
+		if horizontal_align in [UP_LEFT_ALIGN, UP_RIGHT_ALIGN]:
 			text_y_pos = viewport_dimensions[3] - vertical_offset
 
-			# The vertical offset has to be inverted in order for the lines to be drawn from top to bottom
+			# The vertical offset has to be inverted in order for the row of text to be drawn below the point given
 			vertical_offset *= -1
 		else:
+			# The row of text is going to be drawn on the lower part of the viewport. Therefore, we can use the y
+			# coordinate of the lower left corner
 			text_y_pos = viewport_dimensions[1]
 
-		for _ in range(lines_count):
+		while True:
 			yield text_x_pos, text_y_pos
 
 			text_y_pos += vertical_offset
@@ -262,13 +327,14 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	show_coord_attr = None
 	show_length_attr = None
 	show_label_attr = None
-	show_detailed_attr = None
+	show_details_attr = None
 	arrow_head_size_attr = None
+	details_type_attr = None
 	details_font_size_attr = None
-	details_position_attr = None
+	details_align_attr = None
 	line_style_attr = None
 	visible_attr = None
-	basis_visible_attr = None
+	show_base_vectors_attr = None
 	base1_attr = None
 	base2_attr = None
 	base3_attr = None
@@ -311,6 +377,97 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			end_point = draw_data.points[1]
 			view.drawText(text, end_point)
 
+	@classmethod
+	def _draw_2d_text_lines(cls, gl_ft, text_lines, details_align, local_matrix_inverse, text_lines_colors=None):
+		"""
+
+		:param gl_ft:
+		:param list text_lines:
+		:param int details_align:
+		:param list|None text_lines_colors:
+		:param OpenMaya.MMatrix local_matrix_inverse:
+		"""
+		if text_lines_colors is None or not len(text_lines_colors) == len(text_lines):
+			text_lines_colors = [om.MColor((0, 0, 0)) for __ in range(len(text_lines))]
+
+		# TODO: Currently there is no support for changing the font size for the text. For the moment,
+		#  I need to find out how to get the font size that will be used for drawing the text in order
+		#  to calculate the vertical offset between lines (including the first line when the alignment
+		#  is set to any of the top corners). For the time being, I'm using 12 as the default font size.
+		#  This is the value I get when executing the following command: cmds.optionVar(q="smallFontSize")
+		details_font_size = DEF_DETAIL_FONT_SIZE
+		details_rows_start_iter = cls.text_rows_2d_drawing_coords(horizontal_align=details_align,
+		                                                          vertical_offset=details_font_size + 5)
+		maya_text_align = omui.M3dView.kLeft if details_align in [LOW_LEFT_ALIGN,
+		                                                          UP_LEFT_ALIGN] else omui.M3dView.kRight
+		active_view = omui.M3dView.active3dView()
+		active_view_camera_path = active_view.getCamera()
+		mfn_camera = om.MFnCamera(active_view_camera_path)
+		camera_view_dir = mfn_camera.viewDirection(om.MSpace.kObject)
+		near_plane_point = om.MPoint(mfn_camera.nearClippingPlane * camera_view_dir)
+		far_plane_point = om.MPoint(mfn_camera.farClippingPlane * camera_view_dir)
+
+		# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
+		# from the bottom up. To do this, the vector's order has to be reversed so the details for the
+		# last vector are drawn first and those for the first vector are drawn last.
+		if details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]:
+			text_lines = reversed(text_lines)
+			text_lines_colors = reversed(text_lines_colors)
+
+		for line, line_color in zip(text_lines, text_lines_colors):
+			near_plane_point_cp = om.MPoint(near_plane_point)
+			far_plane_point_cp = om.MPoint(far_plane_point)
+
+			if line_color:
+				gl_ft.glColor4f(line_color.r, line_color.g, line_color.b, 1.0)
+
+			# The method viewToWorld converts a 2d port point into a 3d world space point on the plane formed by
+			# its two point arguments: near and far clip plane. However, the drawText method expects a position
+			# in object space. Therefore, the point returned by viewToWorld has to be converted to object space
+			# in order to keep the position.
+			text_x_pos, text_y_pos = next(details_rows_start_iter)
+			active_view.viewToWorld(text_x_pos, text_y_pos, near_plane_point_cp, far_plane_point_cp)
+			active_view.drawText(line, (near_plane_point_cp * local_matrix_inverse), maya_text_align)
+
+	@classmethod
+	def _draw_vectors_details(cls, gl_ft, vectors_draw_data, details_align, local_matrix_inverse):
+		"""
+
+		:param gl_ft:
+		:param list(VectorDrawData) vectors_draw_data:
+		:param int details_align:
+		:param OpenMaya.MMatrix local_matrix_inverse:
+		"""
+
+		vectors_details = []
+		vectors_details_colors = []
+		for draw_data in vectors_draw_data:
+			detail = cls.build_vector_detail(draw_data.label, draw_data.points[1])
+			vectors_details.append(detail)
+			vectors_details_colors.append(draw_data.color)
+
+		cls._draw_2d_text_lines(gl_ft, vectors_details, details_align, local_matrix_inverse,
+		                        text_lines_colors=vectors_details_colors)
+		return
+
+	@classmethod
+	def _draw_object_matrix_details(cls, gl_ft, matrix, details_align, local_matrix_inverse):
+		"""
+
+		:param gl_ft:
+		:param OpenMaya.MMatrix matrix:
+		:param int details_align:
+		:param OpenMaya.MMatrix local_matrix_inverse:
+		"""
+		rows_values = []
+		rows_colors = []
+		for row_str, row_color in cls.build_matrix_rows_details(matrix):
+			rows_values.append(row_str)
+			rows_colors.append(row_color)
+
+		cls._draw_2d_text_lines(gl_ft, rows_values, details_align, local_matrix_inverse,
+		                        text_lines_colors=rows_colors)
+
 	@staticmethod
 	def initialize():
 		mfn_num_attr = om.MFnNumericAttribute()
@@ -341,7 +498,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr.default = 1.0
 		mfn_num_attr.affectsAppearance = True
 
-		VectorsVis.basis_visible_attr = mfn_enum_attr.create("basis", "showBasis")
+		VectorsVis.show_base_vectors_attr = mfn_enum_attr.create("showBaseVectors", "showBaseVectors")
 		mfn_enum_attr.addField("False", 0)
 		mfn_enum_attr.addField("True", 1)
 		mfn_enum_attr.writable = True
@@ -350,7 +507,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_enum_attr.default = 0
 		mfn_enum_attr.affectsAppearance = True
 
-		VectorsVis.show_detailed_attr = mfn_enum_attr.create("detailed", "showDetailed")
+		VectorsVis.show_details_attr = mfn_enum_attr.create("showDetails", "showDetailes")
 		mfn_enum_attr.addField("False", 0)
 		mfn_enum_attr.addField("True", 1)
 		mfn_enum_attr.writable = True
@@ -367,10 +524,18 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr.default = DEF_DETAIL_FONT_SIZE
 		mfn_num_attr.affectsAppearance = True
 
-		VectorsVis.details_position_attr = mfn_enum_attr.create("detailsPosition", "detailsPosition")
+		VectorsVis.details_align_attr = mfn_enum_attr.create("detailsAlign", "detailsAlign")
 		for align_label, align_value in ALIGN_LABELS:
 			mfn_enum_attr.addField(align_label, align_value)
 
+		mfn_enum_attr.storable = True
+		mfn_enum_attr.writable = True
+		mfn_enum_attr.keyable = False
+		mfn_enum_attr.affectsAppearance = True
+
+		VectorsVis.details_type_attr = mfn_enum_attr.create("detailsType", "detailsType")
+		mfn_enum_attr.addField("Vectors", 0)
+		mfn_enum_attr.addField("Matrix", 1)
 		mfn_enum_attr.storable = True
 		mfn_enum_attr.writable = True
 		mfn_enum_attr.keyable = False
@@ -437,28 +602,29 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_num_attr.writable = False
 		mfn_num_attr.storable = False
 		mfn_num_attr.keyable = False
-		mfn_num_attr.default = (VectorsVis.basis_vectors[0].x, VectorsVis.basis_vectors[0].y,
-		                        VectorsVis.basis_vectors[0].z)
+		mfn_num_attr.default = (VectorsVis.base_vectors[0].x, VectorsVis.base_vectors[0].y,
+		                        VectorsVis.base_vectors[0].z)
 
 		VectorsVis.base2_attr = mfn_num_attr.createPoint("base2", "base2")
 		mfn_num_attr.writable = False
 		mfn_num_attr.storable = False
 		mfn_num_attr.keyable = False
-		mfn_num_attr.default = (VectorsVis.basis_vectors[1].x, VectorsVis.basis_vectors[1].y,
-		                        VectorsVis.basis_vectors[1].z)
+		mfn_num_attr.default = (VectorsVis.base_vectors[1].x, VectorsVis.base_vectors[1].y,
+		                        VectorsVis.base_vectors[1].z)
 
 		VectorsVis.base3_attr = mfn_num_attr.createPoint("base3", "base3")
 		mfn_num_attr.writable = False
 		mfn_num_attr.storable = False
 		mfn_num_attr.keyable = False
-		mfn_num_attr.default = (VectorsVis.basis_vectors[2].x, VectorsVis.basis_vectors[2].y,
-		                        VectorsVis.basis_vectors[2].z)
+		mfn_num_attr.default = (VectorsVis.base_vectors[2].x, VectorsVis.base_vectors[2].y,
+		                        VectorsVis.base_vectors[2].z)
 
 		VectorsVis.addAttribute(VectorsVis.line_width_attr)
 		VectorsVis.addAttribute(VectorsVis.arrow_head_size_attr)
-		VectorsVis.addAttribute(VectorsVis.basis_visible_attr)
-		VectorsVis.addAttribute(VectorsVis.show_detailed_attr)
-		VectorsVis.addAttribute(VectorsVis.details_position_attr)
+		VectorsVis.addAttribute(VectorsVis.show_base_vectors_attr)
+		VectorsVis.addAttribute(VectorsVis.show_details_attr)
+		VectorsVis.addAttribute(VectorsVis.details_type_attr)
+		VectorsVis.addAttribute(VectorsVis.details_align_attr)
 		VectorsVis.addAttribute(VectorsVis.details_font_size_attr)
 		VectorsVis.addAttribute(VectorsVis.upd_parent_matrix_attr)
 		VectorsVis.addAttribute(VectorsVis.in_vectors_data_attr)
@@ -486,11 +652,11 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			parent_plug = plug
 
 		if parent_plug.attribute() == self.base1_attr:
-			base_vector = self.basis_vectors[0]
+			base_vector = self.base_vectors[0]
 		elif parent_plug.attribute() == self.base2_attr:
-			base_vector = self.basis_vectors[1]
+			base_vector = self.base_vectors[1]
 		elif parent_plug.attribute() == self.base3_attr:
-			base_vector = self.basis_vectors[2]
+			base_vector = self.base_vectors[2]
 		else:
 			data_block.setClean(plug)
 			return
@@ -510,22 +676,23 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 
 		data_block.setClean(plug)
 
-	def draw(self, view, path, style, status):
+	def draw(self, view, shape_parent_path, style, status):
 		"""
 
 		:param OpenMayaUI.M3dView view:
-		:param OpenMaya.MDagPath path:
+		:param OpenMaya.MDagPath shape_parent_path:
 		:param int style: Style to draw object in. See M3dView.displayStyle() for a list of valid styles.
 		:param int status: selection status of object. See M3dView.displayStatus() for a list of valid status.
 		:return: Reference to self
 		:rtype: VectorsVis
 		"""
-		shape_path = om.MDagPath(path).extendToShape()
+		shape_path = om.MDagPath(shape_parent_path).extendToShape()
+		mfn_shape_dag_node = om.MFnDagNode(shape_path)
 		view_camera_path = view.getCamera()
-		vectors_draw_data = [d for d in self.get_vectors_draw_data_from_shape(shape_path, view_camera_path)]
-		draw_base_vectors = om.MFnDagNode(shape_path).findPlug(VectorsVis.basis_visible_attr, False).asBool()
+		vectors_draw_data = [d for d in self.get_vectors_draw_data_from_vector_vis_node(shape_path, view_camera_path)]
+		draw_base_vectors = mfn_shape_dag_node.findPlug(VectorsVis.show_base_vectors_attr, False).asBool()
 		if draw_base_vectors:
-			base_vectors_draw_data = self.get_base_vectors_from_shape(shape_path, view_camera_path)
+			base_vectors_draw_data = [d for d in self.get_base_vectors_draw_data_from_vector_vis_node(shape_path, view_camera_path)]
 		else:
 			base_vectors_draw_data = None
 
@@ -543,52 +710,32 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		for draw_data in vectors_draw_data:
 			if draw_data.show_coord:
 				end_point = draw_data.points[1]
-				text = _coordinates_to_text(end_point)
+				text = self._coordinates_to_text(end_point)
 			else:
 				text = None
 
 			self._draw_from_vector_draw_data(draw_data, view, gl_ft, text=text)
 
 		if base_vectors_draw_data:
-			for draw_data, axis in zip(base_vectors_draw_data, ['x', 'y', 'z']):
-				self._draw_from_vector_draw_data(draw_data, view, gl_ft, text=axis)
+			for draw_data in base_vectors_draw_data:
+				self._draw_from_vector_draw_data(draw_data, view, gl_ft, text=draw_data.label)
 
-		show_details = om.MFnDagNode(shape_path).findPlug(VectorsVis.show_detailed_attr, False).asBool()
-		if show_details and view.displayStatus(path) in (omui.M3dView.kLead, omui.M3dView.kActive):
-			# TODO: Currently there is no support for changing the font size for the text. For the moment,
-			#  I need to find out how to get the font size that will be used for drawing the text in order
-			#  to calculate the vertical offset between lines (including the first line when the alignment
-			#  is set to any of the top corners). For the time being, I'm using 12 as the default font size.
-			#  This is the value I get when executing the following command: cmds.optionVar(q="smallFontSize")
-			details_font_size = DEF_DETAIL_FONT_SIZE
-			details_align = om.MFnDagNode(shape_path).findPlug(VectorsVis.details_position_attr, False).asInt()
-			details_rows_start_iter = self.next_2d_position(details_align, lines_count=len(vectors_draw_data),
-			                                                vertical_offset=details_font_size)
-			maya_text_align = omui.M3dView.kLeft if details_align in [LOW_LEFT_ALIGN, UP_LEFT_ALIGN] else omui.M3dView.kRight
+		show_details = mfn_shape_dag_node.findPlug(VectorsVis.show_details_attr, False).asBool()
+		shape_selected = view.displayStatus(shape_path) in (omui.M3dView.kLead, omui.M3dView.kActive)
+		shape_parent_selected = view.displayStatus(shape_parent_path) in (omui.M3dView.kLead, omui.M3dView.kActive)
+
+		if show_details and (shape_selected or shape_parent_selected):
+			details_type = mfn_shape_dag_node.findPlug(VectorsVis.details_type_attr, False).asInt()
+			details_align = mfn_shape_dag_node.findPlug(VectorsVis.details_align_attr, False).asInt()
 			shape_inv_matrix = shape_path.inclusiveMatrix().inverse()
-			active_view = view.active3dView()
 
-			# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
-			# from the bottom up. To do this, the vector's order has to be reversed so the details for the
-			# last vector are drawn first and those for the first vector are drawn last.
-			if details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]:
-				vectors_draw_data = reversed(vectors_draw_data)
+			if details_type == 0:
+				self._draw_vectors_details(gl_ft, vectors_draw_data, details_align, shape_inv_matrix)
+			else:
+				mfn_parent_dep = om.MFnDependencyNode(shape_parent_path.node())
+				parent_obj_matrix = om.MFnMatrixData(mfn_parent_dep.findPlug("matrix", False).asMObject()).matrix()
 
-			for vector_data in vectors_draw_data:
-				end_point = vector_data.points[1]
-				vector_detail = self.build_vector_detail(vector_data.label, end_point)
-				detail_color = vector_data.color
-				near_plane_point = om.MPoint()
-				far_plane_point = om.MPoint()
-				gl_ft.glColor4f(detail_color.r, detail_color.g, detail_color.b, 1.0)
-
-				# The method viewToWorld converts a 2d port point into a 3d world space point on the plane formed by
-				# its two point arguments: near and far clip plane. However, the drawText method expects a position
-				# in object space. Therefore, the point returned by viewToWorld has to be converted to object space
-				# in order to keep the position.
-				text_x_pos, text_y_pos = next(details_rows_start_iter)
-				active_view.viewToWorld(text_x_pos, text_y_pos, near_plane_point, far_plane_point)
-				view.drawText(vector_detail, (near_plane_point * shape_inv_matrix), maya_text_align)
+				self._draw_object_matrix_details(gl_ft, parent_obj_matrix, details_align, shape_inv_matrix)
 
 		# Restore the state
 		gl_ft.glPopAttrib()
@@ -607,8 +754,11 @@ class VectorsDrawUserData(om.MUserData):
 	_delete_after_user = True
 	_camera_path = None
 	_vectors_draw_data = None
-	_basis_vectors = None
-	details = None
+	_base_vectors = None
+	_details_type = 0
+	_details_align = LOW_LEFT_ALIGN
+	_matrix = None
+	details = False
 	details_font_size = DEF_DETAIL_FONT_SIZE
 
 	def __init__(self, camera_path):
@@ -619,7 +769,7 @@ class VectorsDrawUserData(om.MUserData):
 		super(VectorsDrawUserData, self).__init__()
 		self._camera_path = camera_path
 		self._vectors_draw_data = []
-		self._basis_vectors = []
+		self._base_vectors = []
 
 	def __eq__(self, other):
 		if not type(other) == VectorsDrawUserData:
@@ -660,7 +810,7 @@ class VectorsDrawUserData(om.MUserData):
 
 		:rtype list[VectorDrawData,]:
 		"""
-		return self._basis_vectors
+		return self._base_vectors
 
 	@property
 	def camera_path(self):
@@ -677,6 +827,39 @@ class VectorsDrawUserData(om.MUserData):
 		:param OpenMaya.MDagPath camera_path:
 		"""
 		self._camera_path = camera_path
+
+	@property
+	def details_align(self):
+		return self._details_align
+
+	@details_align.setter
+	def details_align(self, details_align):
+		if details_align not in [value for _, value in ALIGN_LABELS]:
+			return
+
+		self._details_align = details_align
+
+	@property
+	def details_type(self):
+		return self._details_type
+
+	@details_type.setter
+	def details_type(self, details_type):
+		if details_type not in [0, 1]:
+			return
+
+		self._details_type = details_type
+
+	@property
+	def matrix(self):
+		return self._matrix
+
+	@matrix.setter
+	def matrix(self, matrix):
+		if not isinstance(matrix, om.MMatrix):
+			return
+
+		self._matrix = matrix
 
 	def add_vector_draw_data(self, draw_data):
 		"""
@@ -697,7 +880,7 @@ class VectorsDrawUserData(om.MUserData):
 		if not type(draw_data) == VectorDrawData:
 			raise TypeError("Expected VectorDrawData. Got {}, instead".format(type(draw_data)))
 
-		self._basis_vectors.append(draw_data)
+		self._base_vectors.append(draw_data)
 
 	def clear_draw_data(self):
 		self._vectors_draw_data = []
@@ -750,7 +933,7 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 	def hasUIDrawables(self):
 		return True
 
-	def prepareForDraw(self, obj_path, camera_path, frame_context, old_data):
+	def prepareForDraw(self, vector_vis_node_path, camera_path, frame_context, old_data):
 		"""
 		Called by Maya each time the object needs to be drawn. Any data needed from the Maya dependency graph must
 		be retrieved and cached in this stage. It is invalid to pull data from the Maya dependency graph in the
@@ -768,27 +951,33 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		objects from the user data destructor. If it is not desirable to allow Maya to handle data caching, simply
 		return NULL in this method and ignore the user data parameter in the draw callback method.
 
-		:param OpenMaya.MDagPath obj_path:
+		:param OpenMaya.MDagPath vector_vis_node_path:
 		:param OpenMaya.MDagPath camera_path:
 		:param OpenMayaRender.MFrameContext frame_context:
 		:param OpenMaya.MUserData old_data:
 		:return: The data to be passed to the draw callback method
 		:rtype: VectorsDrawUserData
 		"""
-		mfn_dep_node = om.MFnDependencyNode(obj_path.node())
-		show_base_vectors = mfn_dep_node.findPlug(VectorsVis.basis_visible_attr, False).asBool()
-		show_details = mfn_dep_node.findPlug(VectorsVis.show_detailed_attr, False).asBool()
-		details_font_size = mfn_dep_node.findPlug(VectorsVis.details_font_size_attr, False).asInt()
+		mfn_vectors_vis_node = om.MFnDependencyNode(vector_vis_node_path.node())
+		mfn_dep_parent = om.MFnDependencyNode(vector_vis_node_path.transform())
+		show_base_vectors = mfn_vectors_vis_node.findPlug(VectorsVis.show_base_vectors_attr, False).asBool()
+		show_details = mfn_vectors_vis_node.findPlug(VectorsVis.show_details_attr, False).asBool()
+		details_type = mfn_vectors_vis_node.findPlug(VectorsVis.details_type_attr, False).asInt()
+		details_font_size = mfn_vectors_vis_node.findPlug(VectorsVis.details_font_size_attr, False).asInt()
+		details_align = mfn_vectors_vis_node.findPlug(VectorsVis.details_align_attr, False).asInt()
 
 		vectors_draw_data = VectorsDrawUserData(camera_path)
 		vectors_draw_data.details = show_details
+		vectors_draw_data.details_type = details_type
 		vectors_draw_data.details_font_size = details_font_size
+		vectors_draw_data.details_align = details_align
+		vectors_draw_data.matrix = om.MFnMatrixData(mfn_dep_parent.findPlug(VectorsVis.matrix, False).asMObject()).matrix()
 
-		for draw_data in self.get_vectors_draw_data_from_shape(obj_path, camera_path):
+		for draw_data in self.get_vectors_draw_data_from_vector_vis_node(vector_vis_node_path, camera_path):
 			vectors_draw_data.add_vector_draw_data(draw_data)
 
 		if show_base_vectors:
-			for draw_data in self.get_base_vectors_from_shape(obj_path, camera_path):
+			for draw_data in self.get_base_vectors_draw_data_from_vector_vis_node(vector_vis_node_path, camera_path):
 				vectors_draw_data.add_base_vector_draw_data(draw_data)
 
 		return vectors_draw_data
@@ -817,7 +1006,7 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 
 			if vector_data.show_coord:
 				end_vector_cp = vector_data.points[1]
-				draw_manager.text(end_vector_cp, _coordinates_to_text(end_vector_cp), dynamic=False)
+				draw_manager.text(end_vector_cp, self._coordinates_to_text(end_vector_cp), dynamic=False)
 
 		if data.base_vectors:
 			for draw_data, axis in zip(data.base_vectors, ['x', 'y', 'z']):
@@ -830,30 +1019,73 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 
 		if data.details and omui.M3dView.displayStatus(obj_path) in (omui.M3dView.kLead, omui.M3dView.kActive):
 			vectors_details = data.draw_data
-			details_align = om.MFnDagNode(obj_path.node()).findPlug(VectorsVis.details_position_attr, False).asInt()
-			details_rows_start_iter = self.next_2d_position(details_align, lines_count=len(vectors_details),
-			                                                vertical_offset=data.details_font_size)
-			maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_ALIGN, UP_LEFT_ALIGN] else omr.MUIDrawManager.kRight
-
-			# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
-			# from the bottom up. To do this, the vector's order has to be reversed so the details for the
-			# last vector are drawn first and those for the first vector are drawn last.
-			if details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]:
-				vectors_details = reversed(data.draw_data)
-
+			details_align = data.details_align
+			details_type = data.details_type
+			maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_ALIGN,
+			                                                                UP_LEFT_ALIGN] else omr.MUIDrawManager.kRight
+			draw_in_lower_half = details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]
+			details_rows_start_iter = self.text_rows_2d_drawing_coords(horizontal_align=details_align,
+			                                                           vertical_offset=data.details_font_size + 5)
 			draw_manager.setFontSize(data.details_font_size)
 
-			for vector_data in vectors_details:
-				end_point = vector_data.points[1]
-				vector_detail = self.build_vector_detail(vector_data.label, end_point)
-				draw_manager.setColor(vector_data.color)
-				text_x_pos, text_y_pos = next(details_rows_start_iter)
-				next_line_position = om.MPoint(text_x_pos, text_y_pos, 0.0)
+			if details_type == 0:
+				# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
+				# from the bottom up. To do this, the vector's order has to be reversed so the details for the
+				# last vector are drawn first and those for the first vector are drawn last.
+				if draw_in_lower_half:
+					vectors_details = reversed(data.draw_data)
 
-				draw_manager.text2d(next_line_position, vector_detail, alignment=maya_text_align, dynamic=False)
+				for vector_data in vectors_details:
+					end_point = vector_data.points[1]
+					vector_detail = self.build_vector_detail(vector_data.label, end_point)
+					text_x_pos, text_y_pos = next(details_rows_start_iter)
+					next_line_point = om.MPoint(text_x_pos, text_y_pos, 0.0)
+
+					draw_manager.setColor(vector_data.color)
+					draw_manager.text2d(next_line_point, vector_detail, alignment=maya_text_align, dynamic=False)
+			elif details_type == 1:
+				matrix_details = self.build_matrix_rows_details(data.matrix)
+
+				# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
+				# from the bottom up. To do this, the vector's order has to be reversed so the details for the
+				# last vector are drawn first and those for the first vector are drawn last.
+				if draw_in_lower_half:
+					matrix_details = reversed([d for d in matrix_details])
+
+				for row_details, row_color in matrix_details:
+					text_x_pos, text_y_pos = next(details_rows_start_iter)
+					next_line_point = om.MPoint(text_x_pos, text_y_pos, 0.0)
+
+					draw_manager.setColor(row_color)
+					draw_manager.text2d(next_line_point, row_details, alignment=maya_text_align,
+					                    dynamic=False)
 
 		draw_manager.endDrawable()
 		return self
+
+	def _draw_vectors_details(self, vectors_draw_data, details_align, draw_manager):
+		vectors_details = vectors_draw_data.draw_data
+		details_rows_start_iter = self.text_rows_2d_drawing_coords(horizontal_align=details_align,
+		                                                           vertical_offset=vectors_draw_data.details_font_size + 5)
+		maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_ALIGN,
+		                                                                UP_LEFT_ALIGN] else omr.MUIDrawManager.kRight
+
+		# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
+		# from the bottom up. To do this, the vector's order has to be reversed so the details for the
+		# last vector are drawn first and those for the first vector are drawn last.
+		if details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]:
+			vectors_details = reversed(vectors_draw_data.draw_data)
+
+		draw_manager.setFontSize(vectors_draw_data.details_font_size)
+
+		for vector_data in vectors_details:
+			end_point = vector_data.points[1]
+			vector_detail = self.build_vector_detail(vector_data.label, end_point)
+			draw_manager.setColor(vector_data.color)
+			text_x_pos, text_y_pos = next(details_rows_start_iter)
+			next_line_position = om.MPoint(text_x_pos, text_y_pos, 0.0)
+
+			draw_manager.text2d(next_line_position, vector_detail, alignment=maya_text_align, dynamic=False)
 
 
 def initializePlugin(obj):
