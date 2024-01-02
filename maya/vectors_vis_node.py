@@ -18,16 +18,19 @@ DEF_ARROW_BASE = 0.3
 VectorDrawData = namedtuple("VectorDrawData", ['label', 'points', 'color', 'line_style', 'line_width', 'show_coord'])
 DEFAULT_VECTOR_LABEL = "v"
 DEF_DETAIL_FONT_SIZE = omr.MUIDrawManager.kDefaultFontSize
-LOW_LEFT_ALIGN = 0
-LOW_RIGHT_ALIGN = 1
-UP_RIGHT_ALIGN = 2
-UP_LEFT_ALIGN = 3
+LOW_LEFT_CORNER_ALIGN = 0
+LOW_RIGHT_CORNER_ALIGN = 1
+UP_RIGHT_CORNER_ALIGN = 2
+UP_LEFT_CORNER_ALIGN = 3
+OBJECT_ALIGN = 4
 ALIGN_LABELS = [
-	("Lower-left", LOW_LEFT_ALIGN),
-	("Lower-right", LOW_RIGHT_ALIGN),
-	("Upper-right", UP_RIGHT_ALIGN),
-	("Upper-left", UP_LEFT_ALIGN),
+	("Lower-left corner", LOW_LEFT_CORNER_ALIGN),
+	("Lower-right corner", LOW_RIGHT_CORNER_ALIGN),
+	("Upper-right corner", UP_RIGHT_CORNER_ALIGN),
+	("Upper-left corner", UP_LEFT_CORNER_ALIGN),
+	("Object", OBJECT_ALIGN),
 ]
+OBJECT_ALIGN_TO_MAYA = omui.M3dView.kLeft
 
 # RIGHT_ALIGN = 7
 # LEFT_ALIGN = 13
@@ -280,38 +283,51 @@ class VectorsVisMixIn(object):
 			yield " | ".join(row_values), row_color
 
 	@staticmethod
-	def text_rows_2d_drawing_coords(horizontal_align=LOW_LEFT_ALIGN, vertical_offset=DEF_DETAIL_FONT_SIZE):
+	def text_lines_drawing_port_coord_generator(text_position=LOW_LEFT_CORNER_ALIGN, font_size=DEF_DETAIL_FONT_SIZE, x_offset=None, y_offset=None):
 		"""
-
-		:param int horizontal_align:
-		:param int vertical_offset:
-		:return: The x and y 2D coordinates for drawing each line of text, based on the active viewport's resolution.
-		:rtype: iter((float, float),)
+		Calculates the viewport coordinates (2d) for lines of text based on the alignment received as argument:
+		Lower left corner, lower right corner, upper right corner, upper left corner.
+		:param int text_position:
+		:param int font_size:
+		:param int|None x_offset:
+		:param int|None y_offset:
+		:return: The viewport coordinates (2d) for drawing lines of text, based on the active viewport's resolution.
+		:rtype: iter((int, int),)
 		"""
+		# Return position based on viewport's dimensions
 		active_view = omui.M3dView.active3dView()
 
 		# The viewport dimensions are returned in a list with four values. The first two correspond to the
 		# lower left corner's x and y coordinates whereas the last two correspond to the upper right corner.
 		viewport_dimensions = active_view.viewport()
-		text_x_pos = viewport_dimensions[0] if horizontal_align in [LOW_LEFT_ALIGN, UP_LEFT_ALIGN] else viewport_dimensions[2]
+
+		if text_position in [LOW_LEFT_CORNER_ALIGN, UP_LEFT_CORNER_ALIGN]:
+			text_x_pos = viewport_dimensions[0]
+		else:
+			text_x_pos = viewport_dimensions[2]
+
 		# TODO: If the text is set to one of the top corners, the font's height has to be removed from the top
 		#  corner's y value. Otherwise, the first line of text will not be visible because the text is always drawn
-		#  above the point given and there is no way to set its alignment unlike the horizontal alignment. For the
-		#  time being, we'll use the vertical offset instead of the font's actual height.
-		if horizontal_align in [UP_LEFT_ALIGN, UP_RIGHT_ALIGN]:
-			text_y_pos = viewport_dimensions[3] - vertical_offset
+		#  above the point given and there is no way to set its alignment unlike the horizontal alignment.
+		if text_position in [UP_LEFT_CORNER_ALIGN, UP_RIGHT_CORNER_ALIGN]:
+			text_y_pos = viewport_dimensions[3] - font_size
 
-			# The vertical offset has to be inverted in order for the row of text to be drawn below the point given
-			vertical_offset *= -1
+			# The vertical offset has to be inverted in order for the row of text to be drawn below the given point
+			font_size *= -1
 		else:
 			# The row of text is going to be drawn on the lower part of the viewport. Therefore, we can use the y
 			# coordinate of the lower left corner
 			text_y_pos = viewport_dimensions[1]
 
+		if x_offset:
+			text_x_pos += x_offset
+		if y_offset:
+			text_y_pos += y_offset
+
 		while True:
 			yield text_x_pos, text_y_pos
 
-			text_y_pos += vertical_offset
+			text_y_pos += font_size
 
 
 class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
@@ -378,15 +394,20 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			view.drawText(text, end_point)
 
 	@classmethod
-	def _draw_2d_text_lines(cls, gl_ft, text_lines, details_align, local_matrix_inverse, text_lines_colors=None):
+	def _draw_2d_text_lines_on_viewport(cls, gl_ft, text_lines, details_align, shape_matrix_inverse=None, text_lines_colors=None):
 		"""
 
 		:param gl_ft:
 		:param list text_lines:
 		:param int details_align:
 		:param list|None text_lines_colors:
-		:param OpenMaya.MMatrix local_matrix_inverse:
+		:param OpenMaya.MMatrix|None shape_matrix_inverse: The shape node's world inverse matrix. Necessary for the
+			text to stay anchored on the position specified by details_align.
 		"""
+		if shape_matrix_inverse is None:
+			shape_matrix_inverse = om.MMatrix()
+			shape_matrix_inverse.setToIdentity()
+
 		if text_lines_colors is None or not len(text_lines_colors) == len(text_lines):
 			text_lines_colors = [om.MColor((0, 0, 0)) for __ in range(len(text_lines))]
 
@@ -396,10 +417,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		#  is set to any of the top corners). For the time being, I'm using 12 as the default font size.
 		#  This is the value I get when executing the following command: cmds.optionVar(q="smallFontSize")
 		details_font_size = DEF_DETAIL_FONT_SIZE
-		details_rows_start_iter = cls.text_rows_2d_drawing_coords(horizontal_align=details_align,
-		                                                          vertical_offset=details_font_size + 5)
-		maya_text_align = omui.M3dView.kLeft if details_align in [LOW_LEFT_ALIGN,
-		                                                          UP_LEFT_ALIGN] else omui.M3dView.kRight
+
 		active_view = omui.M3dView.active3dView()
 		active_view_camera_path = active_view.getCamera()
 		mfn_camera = om.MFnCamera(active_view_camera_path)
@@ -407,14 +425,30 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		near_plane_point = om.MPoint(mfn_camera.nearClippingPlane * camera_view_dir)
 		far_plane_point = om.MPoint(mfn_camera.farClippingPlane * camera_view_dir)
 
+		if details_align == OBJECT_ALIGN:
+			# Overwrite the details_align original value to the upper left corner. Then, calculate an offset from
+			# that corner to the object's projection on the viewport.
+			details_align = UP_LEFT_CORNER_ALIGN
+			viewport_dim = active_view.viewport()
+			x_offset, y_offset, __ = active_view.worldToView(om.MPoint() * shape_matrix_inverse.inverse())
+			y_offset -= viewport_dim[3]
+		else:
+			x_offset = y_offset = 0
+
+		maya_text_align = omui.M3dView.kLeft if details_align in [LOW_LEFT_CORNER_ALIGN, UP_LEFT_CORNER_ALIGN] else omui.M3dView.kRight
+		details_rows_start_iter = cls.text_lines_drawing_port_coord_generator(text_position=details_align,
+		                                                                      font_size=details_font_size + 5,
+		                                                                      x_offset=x_offset, y_offset=y_offset)
+
 		# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
 		# from the bottom up. To do this, the vector's order has to be reversed so the details for the
 		# last vector are drawn first and those for the first vector are drawn last.
-		if details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]:
+		if details_align in [LOW_LEFT_CORNER_ALIGN, LOW_RIGHT_CORNER_ALIGN]:
 			text_lines = reversed(text_lines)
 			text_lines_colors = reversed(text_lines_colors)
 
-		for line, line_color in zip(text_lines, text_lines_colors):
+		for i, line_data in enumerate(zip(text_lines, text_lines_colors)):
+			line, line_color = line_data
 			near_plane_point_cp = om.MPoint(near_plane_point)
 			far_plane_point_cp = om.MPoint(far_plane_point)
 
@@ -427,10 +461,10 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			# in order to keep the position.
 			text_x_pos, text_y_pos = next(details_rows_start_iter)
 			active_view.viewToWorld(text_x_pos, text_y_pos, near_plane_point_cp, far_plane_point_cp)
-			active_view.drawText(line, (near_plane_point_cp * local_matrix_inverse), maya_text_align)
+			active_view.drawText(line, near_plane_point_cp * shape_matrix_inverse, maya_text_align)
 
 	@classmethod
-	def _draw_vectors_details(cls, gl_ft, vectors_draw_data, details_align, local_matrix_inverse):
+	def _draw_vectors_details_on_viewport(cls, gl_ft, vectors_draw_data, details_align, local_matrix_inverse):
 		"""
 
 		:param gl_ft:
@@ -446,12 +480,11 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			vectors_details.append(detail)
 			vectors_details_colors.append(draw_data.color)
 
-		cls._draw_2d_text_lines(gl_ft, vectors_details, details_align, local_matrix_inverse,
-		                        text_lines_colors=vectors_details_colors)
-		return
+		cls._draw_2d_text_lines_on_viewport(gl_ft, vectors_details, details_align, local_matrix_inverse,
+		                                    text_lines_colors=vectors_details_colors)
 
 	@classmethod
-	def _draw_object_matrix_details(cls, gl_ft, matrix, details_align, local_matrix_inverse):
+	def _draw_matrix_details_on_viewport(cls, gl_ft, matrix, details_align, local_matrix_inverse):
 		"""
 
 		:param gl_ft:
@@ -465,8 +498,8 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			rows_values.append(row_str)
 			rows_colors.append(row_color)
 
-		cls._draw_2d_text_lines(gl_ft, rows_values, details_align, local_matrix_inverse,
-		                        text_lines_colors=rows_colors)
+		cls._draw_2d_text_lines_on_viewport(gl_ft, rows_values, details_align, local_matrix_inverse,
+		                                    text_lines_colors=rows_colors)
 
 	@staticmethod
 	def initialize():
@@ -730,12 +763,12 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 			shape_inv_matrix = shape_path.inclusiveMatrix().inverse()
 
 			if details_type == 0:
-				self._draw_vectors_details(gl_ft, vectors_draw_data, details_align, shape_inv_matrix)
+				self._draw_vectors_details_on_viewport(gl_ft, vectors_draw_data, details_align, shape_inv_matrix)
 			else:
 				mfn_parent_dep = om.MFnDependencyNode(shape_parent_path.node())
 				parent_obj_matrix = om.MFnMatrixData(mfn_parent_dep.findPlug("matrix", False).asMObject()).matrix()
 
-				self._draw_object_matrix_details(gl_ft, parent_obj_matrix, details_align, shape_inv_matrix)
+				self._draw_matrix_details_on_viewport(gl_ft, parent_obj_matrix, details_align, shape_inv_matrix)
 
 		# Restore the state
 		gl_ft.glPopAttrib()
@@ -756,7 +789,7 @@ class VectorsDrawUserData(om.MUserData):
 	_vectors_draw_data = None
 	_base_vectors = None
 	_details_type = 0
-	_details_align = LOW_LEFT_ALIGN
+	_details_align = LOW_LEFT_CORNER_ALIGN
 	_matrix = None
 	details = False
 	details_font_size = DEF_DETAIL_FONT_SIZE
@@ -994,6 +1027,8 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		:param OpenMayaRender.MUIDrawManager draw_manager:
 		:param OpenMayaRender.MFrameContext frame_context:
 		:param VectorsDrawUserData data:
+		:return: Reference to self
+		:rtype: VectorsVisDrawOverride
 		"""
 		draw_manager.beginDrawable()
 		draw_2d = False
@@ -1021,11 +1056,24 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 			vectors_details = data.draw_data
 			details_align = data.details_align
 			details_type = data.details_type
-			maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_ALIGN,
-			                                                                UP_LEFT_ALIGN] else omr.MUIDrawManager.kRight
-			draw_in_lower_half = details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]
-			details_rows_start_iter = self.text_rows_2d_drawing_coords(horizontal_align=details_align,
-			                                                           vertical_offset=data.details_font_size + 5)
+
+			if details_align == OBJECT_ALIGN:
+				# Overwrite the details_align original value to the upper left corner. Then, calculate an offset from
+				# that corner to the object's projection on the viewport.
+				details_align = UP_LEFT_CORNER_ALIGN
+				active_view = omui.M3dView.active3dView()
+				x_offset, y_offset, __ = active_view.worldToView(om.MPoint() * obj_path.inclusiveMatrix())
+				y_offset -= active_view.viewport()[3]
+			else:
+				x_offset = y_offset = 0
+
+			draw_in_lower_half = details_align in [LOW_LEFT_CORNER_ALIGN, LOW_RIGHT_CORNER_ALIGN]
+			details_rows_start_iter = self.text_lines_drawing_port_coord_generator(text_position=details_align,
+			                                                                       font_size=data.details_font_size + 5,
+			                                                                       x_offset=x_offset, y_offset=y_offset)
+			maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_CORNER_ALIGN,
+			                                                                UP_LEFT_CORNER_ALIGN] else omr.MUIDrawManager.kRight
+
 			draw_manager.setFontSize(data.details_font_size)
 
 			if details_type == 0:
@@ -1062,30 +1110,6 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 
 		draw_manager.endDrawable()
 		return self
-
-	def _draw_vectors_details(self, vectors_draw_data, details_align, draw_manager):
-		vectors_details = vectors_draw_data.draw_data
-		details_rows_start_iter = self.text_rows_2d_drawing_coords(horizontal_align=details_align,
-		                                                           vertical_offset=vectors_draw_data.details_font_size + 5)
-		maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_ALIGN,
-		                                                                UP_LEFT_ALIGN] else omr.MUIDrawManager.kRight
-
-		# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
-		# from the bottom up. To do this, the vector's order has to be reversed so the details for the
-		# last vector are drawn first and those for the first vector are drawn last.
-		if details_align in [LOW_LEFT_ALIGN, LOW_RIGHT_ALIGN]:
-			vectors_details = reversed(vectors_draw_data.draw_data)
-
-		draw_manager.setFontSize(vectors_draw_data.details_font_size)
-
-		for vector_data in vectors_details:
-			end_point = vector_data.points[1]
-			vector_detail = self.build_vector_detail(vector_data.label, end_point)
-			draw_manager.setColor(vector_data.color)
-			text_x_pos, text_y_pos = next(details_rows_start_iter)
-			next_line_position = om.MPoint(text_x_pos, text_y_pos, 0.0)
-
-			draw_manager.text2d(next_line_position, vector_detail, alignment=maya_text_align, dynamic=False)
 
 
 def initializePlugin(obj):
