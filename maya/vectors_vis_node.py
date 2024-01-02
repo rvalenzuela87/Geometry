@@ -330,6 +330,19 @@ class VectorsVisMixIn(object):
 			text_y_pos += font_size
 
 
+class VectorsVisCallbackId(om.MUserData):
+	_callback_id = None
+
+	def __init__(self):
+		super(VectorsVisCallbackId, self).__init__()
+
+	def set_id(self, callback_id):
+		self._callback_id = callback_id
+
+	def get_id(self):
+		return self._callback_id
+
+
 class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	drawDBClassification = "drawdb/geometry/vectorsVis"
 	drawRegistrantId = "VectorsVisPlugin"
@@ -392,6 +405,46 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		if text:
 			end_point = draw_data.points[1]
 			view.drawText(text, end_point)
+
+	@classmethod
+	def _connect_parent_node_matrix_callback(cls, child_path, parent_path, client_data=None):
+		"""
+
+		:param OpenMaya.MDagPath child_path:
+		:param OpenMaya.MDagPath parent_path:
+		:param Any|None client_data:
+		"""
+		node_mfn_dag = om.MFnDagNode(child_path.node())
+		node_parent_matrix_plug = node_mfn_dag.findPlug(cls.upd_parent_matrix_attr, False)
+		parent_node_matrix_plug = om.MFnDagNode(parent_path.node()).findPlug("matrix", False)
+
+		m_dag_modifier = om.MDagModifier()
+		if node_parent_matrix_plug.isDestination:
+			m_dag_modifier.disconnect(node_parent_matrix_plug.source(), node_parent_matrix_plug)
+
+		m_dag_modifier.connect(parent_node_matrix_plug, node_parent_matrix_plug)
+		m_dag_modifier.doIt()
+
+	@classmethod
+	def _rename_parent_node_callback(cls, child_path, parent_path, client_data=None):
+		"""
+
+		:param OpenMaya.MDagPath child_path:
+		:param OpenMaya.MDagPath parent_path:
+		:param Any|None client_data:
+		"""
+		node_name = om.MFnDagNode(child_path.node()).name()
+		node_number = node_name[len("vectorsVis"):]
+		if not node_number:
+			node_number = "1"
+
+		m_dag_modifier = om.MDagModifier()
+		m_dag_modifier.renameNode(child_path.node(), "vectorsVisShape{}".format(node_number))
+		m_dag_modifier.renameNode(parent_path.node(), "vectorsVis{}".format(node_number))
+		m_dag_modifier.doIt()
+
+		if client_data and client_data.get_id():
+			om.MMessage.removeCallback(client_data.get_id())
 
 	@classmethod
 	def _draw_2d_text_lines_on_viewport(cls, gl_ft, text_lines, details_align, shape_matrix_inverse=None, text_lines_colors=None):
@@ -672,6 +725,16 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	@classmethod
 	def creator(cls):
 		return cls()
+
+	def postConstructor(self):
+		node_path = om.MFnDagNode(self.thisMObject()).getPath()
+		om.MDagMessage.addParentAddedDagPathCallback(node_path, self._connect_parent_node_matrix_callback, None)
+
+		callbacks_user_data = VectorsVisCallbackId()
+		rename_parent_cb_id = om.MDagMessage.addParentAddedDagPathCallback(node_path,
+		                                                                   self._rename_parent_node_callback,
+		                                                                   callbacks_user_data)
+		callbacks_user_data.set_id(rename_parent_cb_id)
 
 	def compute(self, plug, data_block):
 		"""
