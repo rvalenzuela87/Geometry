@@ -438,14 +438,22 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		:param Any|None client_data:
 		"""
 		node_name = om.MFnDagNode(child_path.node()).name()
-		node_number = node_name[len("vectorsVis"):]
-		if not node_number:
-			node_number = "1"
+		node_number = None
 
-		m_dag_modifier = om.MDagModifier()
-		m_dag_modifier.renameNode(child_path.node(), "vectorsVisShape{}".format(node_number))
-		m_dag_modifier.renameNode(parent_path.node(), "vectorsVis{}".format(node_number))
-		m_dag_modifier.doIt()
+		if not node_name:
+			node_number = "1"
+		else:
+			match = re.match("{}(?:_*)(\d*)$".format(COMMAND_STR), node_name)
+			if match:
+				node_number = match.group(1)
+				if len(node_number) == 0:
+					node_number = "1"
+
+		if node_number:
+			m_dag_modifier = om.MDagModifier()
+			m_dag_modifier.renameNode(child_path.node(), "vectorsVisShape{}".format(node_number))
+			m_dag_modifier.renameNode(parent_path.node(), "vectorsVis{}".format(node_number))
+			m_dag_modifier.doIt()
 
 		if client_data and client_data.get_id():
 			om.MMessage.removeCallback(client_data.get_id())
