@@ -1,5 +1,6 @@
 import sys
 import math
+import re
 from collections import namedtuple
 import maya.mel as mel
 import maya.api.OpenMaya as om
@@ -7,6 +8,7 @@ import maya.api.OpenMayaUI as omui
 import maya.api.OpenMayaRender as omr
 
 maya_useNewAPI = True
+COMMAND_STR = "vectorsVis"
 SOLID_STYLE = omr.MUIDrawManager.kSolid
 DASHED_STYLE = omr.MUIDrawManager.kDashed
 DEFAULT_LINE_WIDTH = 1.0
@@ -31,6 +33,8 @@ ALIGN_LABELS = [
 	("Object", OBJECT_ALIGN),
 ]
 OBJECT_ALIGN_TO_MAYA = omui.M3dView.kLeft
+
+kAttributeArrayAdded = 6144
 
 # RIGHT_ALIGN = 7
 # LEFT_ALIGN = 13
@@ -344,7 +348,7 @@ class VectorsVisCallbackId(om.MUserData):
 
 
 class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
-	drawDBClassification = "drawdb/geometry/vectorsVis"
+	drawDBClassification = "drawdb/geometry/{}".format(COMMAND_STR)
 	drawRegistrantId = "VectorsVisPlugin"
 	typeId = om.MTypeId(0x80007)
 
@@ -445,6 +449,22 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 
 		if client_data and client_data.get_id():
 			om.MMessage.removeCallback(client_data.get_id())
+
+	@classmethod
+	def _vector_added_callback(cls, attr_message_id, new_vector_plug, __, client_data=None):
+		"""
+
+		:param int attr_message_id:
+		:param OpenMaya.MPlug new_vector_plug:
+		:param OpenMaya.MPlug __:
+		:param OpenMaya.MUserData client_data:
+		"""
+
+		if not attr_message_id == kAttributeArrayAdded or not new_vector_plug.attribute() == cls.in_vectors_data_attr:
+			return
+
+		vector_label_plug = new_vector_plug.child(cls.label_attr)
+		vector_label_plug.setString("{}{}".format(DEFAULT_VECTOR_LABEL, new_vector_plug.logicalIndex()))
 
 	@classmethod
 	def _draw_2d_text_lines_on_viewport(cls, gl_ft, text_lines, details_align, shape_matrix_inverse=None, text_lines_colors=None):
@@ -735,6 +755,8 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		                                                                   self._rename_parent_node_callback,
 		                                                                   callbacks_user_data)
 		callbacks_user_data.set_id(rename_parent_cb_id)
+
+		om.MNodeMessage.addAttributeChangedCallback(self.thisMObject(), self._vector_added_callback, None)
 
 	def compute(self, plug, data_block):
 		"""
