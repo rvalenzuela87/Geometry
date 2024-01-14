@@ -287,14 +287,14 @@ class VectorsVisMixIn(object):
 			yield " | ".join(row_values), row_color
 
 	@staticmethod
-	def text_lines_drawing_port_coord_generator(text_position=LOW_LEFT_CORNER_ALIGN, font_size=DEF_DETAIL_FONT_SIZE, x_offset=None, y_offset=None):
+	def text_lines_drawing_port_coord_generator(text_position=LOW_LEFT_CORNER_ALIGN, font_size=DEF_DETAIL_FONT_SIZE, h_offset=0, v_offset=0):
 		"""
 		Calculates the viewport coordinates (2d) for lines of text based on the alignment received as argument:
 		Lower left corner, lower right corner, upper right corner, upper left corner.
 		:param int text_position:
 		:param int font_size:
-		:param int|None x_offset:
-		:param int|None y_offset:
+		:param int|None h_offset:
+		:param int|None v_offset:
 		:return: The viewport coordinates (2d) for drawing lines of text, based on the active viewport's resolution.
 		:rtype: iter((int, int),)
 		"""
@@ -306,32 +306,32 @@ class VectorsVisMixIn(object):
 		viewport_dimensions = active_view.viewport()
 
 		if text_position in [LOW_LEFT_CORNER_ALIGN, UP_LEFT_CORNER_ALIGN]:
-			text_x_pos = viewport_dimensions[0]
+			text_h_pos = viewport_dimensions[0]
 		else:
-			text_x_pos = viewport_dimensions[2]
+			text_h_pos = viewport_dimensions[2]
 
 		# TODO: If the text is set to one of the top corners, the font's height has to be removed from the top
 		#  corner's y value. Otherwise, the first line of text will not be visible because the text is always drawn
 		#  above the point given and there is no way to set its alignment unlike the horizontal alignment.
 		if text_position in [UP_LEFT_CORNER_ALIGN, UP_RIGHT_CORNER_ALIGN]:
-			text_y_pos = viewport_dimensions[3] - font_size
+			text_v_pos = viewport_dimensions[3] - font_size
 
 			# The vertical offset has to be inverted in order for the row of text to be drawn below the given point
 			font_size *= -1
 		else:
 			# The row of text is going to be drawn on the lower part of the viewport. Therefore, we can use the y
 			# coordinate of the lower left corner
-			text_y_pos = viewport_dimensions[1]
+			text_v_pos = viewport_dimensions[1]
 
-		if x_offset:
-			text_x_pos += x_offset
-		if y_offset:
-			text_y_pos += y_offset
+		if h_offset:
+			text_h_pos += h_offset
+		if v_offset:
+			text_v_pos += v_offset
 
 		while True:
-			yield text_x_pos, text_y_pos
+			yield text_h_pos, text_v_pos
 
-			text_y_pos += font_size
+			text_v_pos += font_size
 
 
 class VectorsVisCallbackId(om.MUserData):
@@ -365,6 +365,9 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 	details_type_attr = None
 	details_font_size_attr = None
 	details_align_attr = None
+	details_3d_offset_attr = None
+	details_ortho_h_offset_attr = None
+	details_ortho_v_offset_attr = None
 	line_style_attr = None
 	visible_attr = None
 	show_base_vectors_attr = None
@@ -519,7 +522,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		maya_text_align = omui.M3dView.kLeft if details_align in [LOW_LEFT_CORNER_ALIGN, UP_LEFT_CORNER_ALIGN] else omui.M3dView.kRight
 		details_rows_start_iter = cls.text_lines_drawing_port_coord_generator(text_position=details_align,
 		                                                                      font_size=details_font_size + 5,
-		                                                                      x_offset=x_offset, y_offset=y_offset)
+		                                                                      h_offset=x_offset, v_offset=y_offset)
 
 		# When the details' table is displayed in the lower area of the viewport, it's easier to draw it
 		# from the bottom up. To do this, the vector's order has to be reversed so the details for the
@@ -645,6 +648,7 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_enum_attr.storable = True
 		mfn_enum_attr.writable = True
 		mfn_enum_attr.keyable = False
+		mfn_enum_attr.default = OBJECT_ALIGN
 		mfn_enum_attr.affectsAppearance = True
 
 		VectorsVis.details_type_attr = mfn_enum_attr.create("detailsType", "detailsType")
@@ -654,6 +658,26 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		mfn_enum_attr.writable = True
 		mfn_enum_attr.keyable = False
 		mfn_enum_attr.affectsAppearance = True
+
+		VectorsVis.details_ortho_h_offset_attr = mfn_num_attr.create("detailsOrthoHOffset", "detailsOrthoHOffset",
+		                                                             om.MFnNumericData.kInt)
+		mfn_num_attr.storable = True
+		mfn_num_attr.writable = True
+		mfn_num_attr.keyable = False
+		mfn_num_attr.affectsAppearance = True
+
+		VectorsVis.details_ortho_v_offset_attr = mfn_num_attr.create("detailsOrthoVOffset", "detailsOrthoVOffset",
+		                                                             om.MFnNumericData.kInt)
+		mfn_num_attr.storable = True
+		mfn_num_attr.writable = True
+		mfn_num_attr.keyable = False
+		mfn_num_attr.affectsAppearance = True
+
+		VectorsVis.details_3d_offset_attr = mfn_num_attr.createPoint("details3dOffset", "details3dOffset")
+		mfn_num_attr.writable = True
+		mfn_num_attr.storable = True
+		mfn_num_attr.keyable = False
+		mfn_num_attr.affectsAppearance = True
 
 		# Individual vectors' attributes
 
@@ -739,6 +763,9 @@ class VectorsVis(VectorsVisMixIn, omui.MPxLocatorNode):
 		VectorsVis.addAttribute(VectorsVis.show_details_attr)
 		VectorsVis.addAttribute(VectorsVis.details_type_attr)
 		VectorsVis.addAttribute(VectorsVis.details_align_attr)
+		VectorsVis.addAttribute(VectorsVis.details_ortho_h_offset_attr)
+		VectorsVis.addAttribute(VectorsVis.details_ortho_v_offset_attr)
+		VectorsVis.addAttribute(VectorsVis.details_3d_offset_attr)
 		VectorsVis.addAttribute(VectorsVis.details_font_size_attr)
 		VectorsVis.addAttribute(VectorsVis.upd_parent_matrix_attr)
 		VectorsVis.addAttribute(VectorsVis.in_vectors_data_attr)
@@ -883,6 +910,9 @@ class VectorsDrawUserData(om.MUserData):
 	_base_vectors = None
 	_details_type = 0
 	_details_align = LOW_LEFT_CORNER_ALIGN
+	_details_3d_offset = None
+	_details_ortho_h_offset = 0
+	_details_ortho_v_offset = 0
 	_matrix = None
 	details = False
 	details_font_size = DEF_DETAIL_FONT_SIZE
@@ -896,6 +926,7 @@ class VectorsDrawUserData(om.MUserData):
 		self._camera_path = camera_path
 		self._vectors_draw_data = []
 		self._base_vectors = []
+		self._details_3d_offset = om.MVector()
 
 	def __eq__(self, other):
 		if not type(other) == VectorsDrawUserData:
@@ -975,6 +1006,28 @@ class VectorsDrawUserData(om.MUserData):
 			return
 
 		self._details_type = details_type
+
+	@property
+	def details_3d_offset(self):
+		return self._details_3d_offset
+
+	@details_3d_offset.setter
+	def details_3d_offset(self, offset):
+		if not type(offset) == om.MVector:
+			return
+
+		self._details_3d_offset = offset
+
+	@property
+	def details_ortho_offset(self):
+		return self._details_ortho_h_offset, self._details_ortho_v_offset
+
+	@details_ortho_offset.setter
+	def details_ortho_offset(self, offset):
+		try:
+			self._details_ortho_h_offset, self._details_ortho_v_offset = offset
+		except TypeError:
+			pass
 
 	@property
 	def matrix(self):
@@ -1091,12 +1144,21 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 		details_type = mfn_vectors_vis_node.findPlug(VectorsVis.details_type_attr, False).asInt()
 		details_font_size = mfn_vectors_vis_node.findPlug(VectorsVis.details_font_size_attr, False).asInt()
 		details_align = mfn_vectors_vis_node.findPlug(VectorsVis.details_align_attr, False).asInt()
+		details_3d_offset_plug = mfn_vectors_vis_node.findPlug(VectorsVis.details_3d_offset_attr, False)
+		details_ortho_h_offset_plug = mfn_vectors_vis_node.findPlug(VectorsVis.details_ortho_h_offset_attr, False)
+		details_ortho_v_offset_plug = mfn_vectors_vis_node.findPlug(VectorsVis.details_ortho_v_offset_attr, False)
+		details_3d_offset = om.MVector(details_3d_offset_plug.child(0).asDouble(),
+		                               details_3d_offset_plug.child(1).asDouble(),
+		                               details_3d_offset_plug.child(2).asDouble())
+		details_ortho_offset = (details_ortho_h_offset_plug.asInt(), details_ortho_v_offset_plug.asInt())
 
 		vectors_draw_data = VectorsDrawUserData(camera_path)
 		vectors_draw_data.details = show_details
 		vectors_draw_data.details_type = details_type
 		vectors_draw_data.details_font_size = details_font_size
 		vectors_draw_data.details_align = details_align
+		vectors_draw_data.details_3d_offset = details_3d_offset
+		vectors_draw_data.details_ortho_offset = details_ortho_offset
 		vectors_draw_data.matrix = om.MFnMatrixData(mfn_dep_parent.findPlug(VectorsVis.matrix, False).asMObject()).matrix()
 
 		for draw_data in self.get_vectors_draw_data_from_vector_vis_node(vector_vis_node_path, camera_path):
@@ -1150,20 +1212,25 @@ class VectorsVisDrawOverride(VectorsVisMixIn, omr.MPxDrawOverride):
 			details_align = data.details_align
 			details_type = data.details_type
 
+			active_view = omui.M3dView.active3dView()
 			if details_align == OBJECT_ALIGN:
 				# Overwrite the details_align original value to the upper left corner. Then, calculate an offset from
 				# that corner to the object's projection on the viewport.
 				details_align = UP_LEFT_CORNER_ALIGN
-				active_view = omui.M3dView.active3dView()
-				x_offset, y_offset, __ = active_view.worldToView(om.MPoint() * obj_path.inclusiveMatrix())
-				y_offset -= active_view.viewport()[3]
+				details_3d_offset = data.details_3d_offset
+				object_world_position = (om.MPoint() * obj_path.inclusiveMatrix()) + details_3d_offset
+				h_offset, v_offset, __ = active_view.worldToView(object_world_position)
+				v_offset -= active_view.viewport()[3]
 			else:
-				x_offset = y_offset = 0
+				details_ortho_offset = data.details_ortho_offset
+				h_offset = details_ortho_offset[0]
+				v_offset = details_ortho_offset[1]
 
 			draw_in_lower_half = details_align in [LOW_LEFT_CORNER_ALIGN, LOW_RIGHT_CORNER_ALIGN]
 			details_rows_start_iter = self.text_lines_drawing_port_coord_generator(text_position=details_align,
 			                                                                       font_size=data.details_font_size + 5,
-			                                                                       x_offset=x_offset, y_offset=y_offset)
+			                                                                       h_offset=h_offset,
+			                                                                       v_offset=v_offset)
 			maya_text_align = omr.MUIDrawManager.kLeft if details_align in [LOW_LEFT_CORNER_ALIGN,
 			                                                                UP_LEFT_CORNER_ALIGN] else omr.MUIDrawManager.kRight
 
@@ -1210,7 +1277,7 @@ def initializePlugin(obj):
 
 	try:
 		plugin.registerNode(
-			"vectorsVis",
+			COMMAND_STR,
 			VectorsVis.typeId,
 			VectorsVis.creator,
 			VectorsVis.initialize,
