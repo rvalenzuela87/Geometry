@@ -8,6 +8,7 @@ import maya.api.OpenMayaRender as omr
 
 maya_useNewAPI = True
 DEFAULT_MASS = 1.0
+DEFAULT_SPACE = om.MSpace.kObject
 
 
 class CenterMassMixIn(object):
@@ -59,9 +60,18 @@ class CenterMassVis(CenterMassMixIn, omui.MPxLocatorNode):
 	show_calc_attr = None
 	mass_points_attr = None
 	point_attr = None
+	point_x_attr = None
+	point_y_attr = None
+	point_z_attr = None
 	mass_attr = None
 	center_mass_attr = None
+	center_mass_x_attr = None
+	center_mass_y_attr = None
+	center_mass_z_attr = None
 	mass_sum_attr = None
+	mesh_attr = None
+	curves_attr = None
+	surfaces_attr = None
 
 	def __init_(self):
 		super(CenterMassVis, self).__init__()
@@ -71,6 +81,7 @@ class CenterMassVis(CenterMassMixIn, omui.MPxLocatorNode):
 		mfn_num_attr = om.MFnNumericAttribute()
 		mfn_comp_attr = om.MFnCompoundAttribute()
 		mfn_enum_attr = om.MFnEnumAttribute()
+		mfn_typed_attr = om.MFnTypedAttribute()
 
 		CenterMassVis.show_mass_attr = mfn_enum_attr.create("massVis", "massVisibliity")
 		mfn_enum_attr.addField("False", 0)
@@ -97,6 +108,10 @@ class CenterMassVis(CenterMassMixIn, omui.MPxLocatorNode):
 		mfn_num_attr.default = (0.0, 0.0, 0.0)
 		mfn_num_attr.affectsAppearance = True
 
+		CenterMassVis.point_x_attr = mfn_num_attr.child(0)
+		CenterMassVis.point_y_attr = mfn_num_attr.child(1)
+		CenterMassVis.point_z_attr = mfn_num_attr.child(2)
+
 		CenterMassVis.mass_attr = mfn_num_attr.create("mass", "mass", om.MFnNumericData.kDouble)
 		mfn_num_attr.storable = True
 		mfn_num_attr.writable = True
@@ -112,11 +127,35 @@ class CenterMassVis(CenterMassMixIn, omui.MPxLocatorNode):
 		mfn_comp_attr.writable = True
 		mfn_comp_attr.affectsAppearance = True
 
+		CenterMassVis.mesh_attr = mfn_typed_attr.create("inMesh", "inMesh", om.MFnData.kMesh)
+		mfn_typed_attr.array = True
+		mfn_typed_attr.storable = False
+		mfn_typed_attr.writable = True
+		mfn_typed_attr.affectsAppearance = True
+
+		CenterMassVis.curves_attr = mfn_typed_attr.create("inCurves", "inCurves", om.MFnData.kNurbsCurve)
+		mfn_typed_attr.array = True
+		mfn_typed_attr.storable = False
+		mfn_typed_attr.writable = True
+		mfn_typed_attr.affectsAppearance = True
+
+		CenterMassVis.surfaces_attr = mfn_typed_attr.create("inSurface", "inSurface", om.MFnData.kNurbsSurface)
+		mfn_typed_attr.array = True
+		mfn_typed_attr.storable = False
+		mfn_typed_attr.writable = True
+		mfn_typed_attr.affectsAppearance = True
+
+		# Output attributes
+
 		CenterMassVis.center_mass_attr = mfn_num_attr.createPoint("centerOfMass", "centerOfMass")
 		mfn_num_attr.writable = False
 		mfn_num_attr.storable = False
 		mfn_num_attr.keyable = False
 		mfn_num_attr.default = (0.0, 0.0, 0.0)
+
+		CenterMassVis.center_mass_x_attr = mfn_num_attr.child(0)
+		CenterMassVis.center_mass_y_attr = mfn_num_attr.child(1)
+		CenterMassVis.center_mass_z_attr = mfn_num_attr.child(2)
 
 		CenterMassVis.mass_sum_attr = mfn_num_attr.create("massSum", "massSum", om.MFnNumericData.kDouble)
 		mfn_num_attr.writable = False
@@ -127,13 +166,94 @@ class CenterMassVis(CenterMassMixIn, omui.MPxLocatorNode):
 		CenterMassVis.addAttribute(CenterMassVis.show_mass_attr)
 		CenterMassVis.addAttribute(CenterMassVis.show_calc_attr)
 		CenterMassVis.addAttribute(CenterMassVis.mass_points_attr)
+		CenterMassVis.addAttribute(CenterMassVis.mesh_attr)
+		CenterMassVis.addAttribute(CenterMassVis.curves_attr)
+		CenterMassVis.addAttribute(CenterMassVis.surfaces_attr)
 		CenterMassVis.addAttribute(CenterMassVis.center_mass_attr)
 		CenterMassVis.addAttribute(CenterMassVis.mass_sum_attr)
 
 		CenterMassVis.attributeAffects(CenterMassVis.point_attr, CenterMassVis.center_mass_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.point_x_attr, CenterMassVis.center_mass_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.point_y_attr, CenterMassVis.center_mass_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.point_z_attr, CenterMassVis.center_mass_attr)
 		CenterMassVis.attributeAffects(CenterMassVis.mass_attr, CenterMassVis.center_mass_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.mesh_attr, CenterMassVis.center_mass_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.curves_attr, CenterMassVis.center_mass_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.surfaces_attr, CenterMassVis.center_mass_attr)
+
 		CenterMassVis.attributeAffects(CenterMassVis.point_attr, CenterMassVis.mass_sum_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.point_x_attr, CenterMassVis.mass_sum_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.point_y_attr, CenterMassVis.mass_sum_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.point_z_attr, CenterMassVis.mass_sum_attr)
 		CenterMassVis.attributeAffects(CenterMassVis.mass_attr, CenterMassVis.mass_sum_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.mesh_attr, CenterMassVis.mass_sum_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.curves_attr, CenterMassVis.mass_sum_attr)
+		CenterMassVis.attributeAffects(CenterMassVis.surfaces_attr, CenterMassVis.mass_sum_attr)
+
+	def _it_mass_points_data_handle(self, array_data_handle):
+		"""
+
+		:param OpenMaya.MArrayDataHandle array_data_handle:
+		:return:
+		:rtype: iter(OpenMaya.MPoint,)
+		"""
+		while not array_data_handle.isDone():
+			mass_point_data = array_data_handle.inputValue()
+			point_plug = mass_point_data.child(self.point_attr)
+			mass = mass_point_data.child(self.mass_attr).asDouble()
+
+			mass_point = om.MPoint(
+				point_plug.child(self.point_x_attr).asFloat(),
+				point_plug.child(self.point_y_attr).asFloat(),
+				point_plug.child(self.point_z_attr).asFloat(),
+				mass
+			)
+
+			yield mass_point
+
+			array_data_handle.next()
+
+	@staticmethod
+	def _it_mesh_data_handle(mesh_array_data_handle):
+		"""
+
+		:param OpenMaya.MArrayDataHandle mesh_array_data_handle:
+		:return:
+		:rtype: iter(OpenMaya.MPoint,)
+		"""
+		while not mesh_array_data_handle.isDone():
+			mesh_data_handle = mesh_array_data_handle.inputValue()
+			mesh_it = om.MItMeshVertex(mesh_data_handle.asMesh())
+			while not mesh_it.isDone():
+				vtx_point = mesh_it.position(DEFAULT_SPACE)
+				vtx_point.w = DEFAULT_MASS
+
+				yield vtx_point
+
+				mesh_it.next()
+
+			mesh_array_data_handle.next()
+
+	@staticmethod
+	def _it_surface_data_handle(surface_array_data_handle):
+		"""
+
+		:param OpenMaya.MArrayDataHandle surface_array_data_handle:
+		:return:
+		:rtype: iter(OpenMaya.MPoint,)
+		"""
+		while not surface_array_data_handle.isDone():
+			surface_data_handle = surface_array_data_handle.inputValue()
+			surface_cv_it = om.MItSurfaceCV(surface_data_handle.asNurbsSurface())
+			while not surface_cv_it.isDone():
+				cv_point = surface_cv_it.position(DEFAULT_SPACE)
+				cv_point.w = DEFAULT_MASS
+
+				yield cv_point
+
+				surface_cv_it.next()
+
+			surface_array_data_handle.next()
 
 	@classmethod
 	def creator(cls):
@@ -179,28 +299,36 @@ class CenterMassVis(CenterMassMixIn, omui.MPxLocatorNode):
 		:param OpenMaya.MPlug plug:
 		:param OpenMaya.MDataBlock data_block:
 		"""
-		if plug.attribute() not in (self.center_mass_attr, self.mass_sum_attr):
+		if plug.attribute() not in (self.center_mass_attr, self.center_mass_x_attr,
+		                            self.center_mass_y_attr, self.center_mass_z_attr, self.mass_sum_attr):
 			data_block.setClean(plug)
 			return
 
-		mass_points = []
+		mesh_input_array = data_block.inputArrayValue(self.mesh_attr)
+		surfaces_input_array = data_block.inputArrayValue(self.surfaces_attr)
 		mass_points_input_array = data_block.inputArrayValue(self.mass_points_attr)
-		while not mass_points_input_array.isDone():
-			mass_point_data = mass_points_input_array.inputValue()
-			mass_points.append(
-				om.MPoint(
-					*mass_point_data.child(self.point_attr).asDouble3(),
-					mass_point_data.child(self.mass_attr).asDouble()
-				)
-			)
-			mass_points_input_array.next()
 
-		center_mass = self.calc_center_mass(mass_points)
+		mass_points_com = self.calc_center_mass(self._it_mass_points_data_handle(mass_points_input_array))
+		mesh_com = self.calc_center_mass(self._it_mesh_data_handle(mesh_input_array))
+		surface_com = self.calc_center_mass(self._it_surface_data_handle(surfaces_input_array))
+
+		center_of_masses = []
+		if mass_points_com.w > 0.0:
+			center_of_masses.append(mass_points_com)
+
+		if mesh_com.w > 0.0:
+			center_of_masses.append(mesh_com)
+
+		if surface_com.w > 0.0:
+			center_of_masses.append(surface_com)
+
+		center_mass = self.calc_center_mass(center_of_masses)
+
 		center_mass_data = data_block.outputValue(self.center_mass_attr)
 		mass_sum_data = data_block.outputValue(self.mass_sum_attr)
 
 		center_mass_data.set3Float(center_mass.x, center_mass.y, center_mass.z)
-		mass_sum_data.setFloat(center_mass.w)
+		mass_sum_data.setDouble(center_mass.w)
 
 		data_block.setClean(plug)
 
@@ -220,6 +348,9 @@ class CenterMassVisDrawUserData(om.MUserData):
 	def __init__(self):
 		super(CenterMassVisDrawUserData, self).__init__()
 		self.mass_points = []
+		self.mesh_list = []
+		self.surfaces_list = []
+		self.curves_list = []
 		self.show_mass = True
 
 	def deleteAfterUser(self):
@@ -299,6 +430,8 @@ class CenterMassVisDrawOverride(CenterMassMixIn, omr.MPxDrawOverride):
 		show_mass = mfn_dep_node.findPlug(CenterMassVis.show_mass_attr, False).asBool()
 		show_calc = mfn_dep_node.findPlug(CenterMassVis.show_calc_attr, False).asBool()
 		mass_points_plug = mfn_dep_node.findPlug(CenterMassVis.mass_points_attr, False)
+		mesh_array_plug = mfn_dep_node.findPlug(CenterMassVis.mesh_attr, False)
+		surface_array_plug = mfn_dep_node.findPlug(CenterMassVis.surfaces_attr, False)
 
 		user_data = CenterMassVisDrawUserData()
 		user_data.show_mass = show_mass
@@ -307,12 +440,20 @@ class CenterMassVisDrawOverride(CenterMassMixIn, omr.MPxDrawOverride):
 			mass_point_plug = mass_points_plug.elementByLogicalIndex(point_index)
 			point_plug = mass_point_plug.child(0)
 			point = om.MPoint(
-				point_plug.child(0).asDouble(),
-				point_plug.child(1).asDouble(),
-				point_plug.child(2).asDouble(),
+				point_plug.child(0).asFloat(),
+				point_plug.child(1).asFloat(),
+				point_plug.child(2).asFloat(),
 				mass_point_plug.child(1).asDouble()
 			)
 			user_data.mass_points.append(point)
+
+		for mesh_index in range(mesh_array_plug.numElements()):
+			mesh_plug = mesh_array_plug.elementByLogicalIndex(mesh_index)
+			user_data.mesh_list.append(mesh_plug.asMObject())
+
+		for surface_index in range(surface_array_plug.numElements()):
+			surface_plug = surface_array_plug.elementByLogicalIndex(surface_index)
+			user_data.surfaces_list.append(surface_plug.asMObject())
 
 		return user_data
 
@@ -334,10 +475,91 @@ class CenterMassVisDrawOverride(CenterMassMixIn, omr.MPxDrawOverride):
 			return self
 
 		draw_manager.beginDrawable()
+
+		# Calculate the points' center of mass
+		points_com = None
 		for point in data.mass_points:
+			# Draw the point's mass
 			draw_manager.text(point, "{}".format(point.w), dynamic=False)
 
-		center_mass_point = self.calc_center_mass(data.mass_points)
+			if points_com is not None:
+				points_com = self.calc_center_mass([points_com, point])
+			else:
+				points_com = point
+
+		# Calculate the center of mass of each connected mesh as well as the collective center
+		meshes_com = None
+		for mesh_data in data.mesh_list:
+			mesh_com = None
+			mesh_it = om.MItMeshVertex(mesh_data)
+			while not mesh_it.isDone():
+				vtx_point = mesh_it.position(DEFAULT_SPACE)
+				vtx_point.w = DEFAULT_MASS
+
+				# Draw the vertex' mass
+				draw_manager.text(vtx_point, "{}".format(vtx_point.w), dynamic=False)
+
+				# Update the mesh's center of mass
+				if mesh_com is not None:
+					mesh_com = self.calc_center_mass([mesh_com, vtx_point])
+				else:
+					mesh_com = vtx_point
+
+				mesh_it.next()
+
+			# Draw the mesh's center of mass
+			if mesh_com is not None:
+				draw_manager.text(mesh_com, "{}".format(mesh_com.w), dynamic=False)
+
+			# Update the meshes' collective center of mass
+			if meshes_com is not None:
+				meshes_com = self.calc_center_mass([meshes_com, mesh_com])
+			else:
+				meshes_com = mesh_com
+
+		# Calculate the center of mass of each connected surface as well as the collective center
+		surfaces_com = None
+		for surface_data in data.surfaces_list:
+			surface_com = None
+			surface_cv_it = om.MItSurfaceCV(surface_data)
+			while not surface_cv_it.isDone():
+				cv_point = surface_cv_it.position(DEFAULT_SPACE)
+				cv_point.w = DEFAULT_MASS
+
+				# Draw the control vertex' mass
+				draw_manager.text(cv_point, "{}".format(cv_point.w), dynamic=False)
+
+				# Update the surface's center of mass
+				if surface_com is not None:
+					surface_com = self.calc_center_mass([surface_com, cv_point])
+				else:
+					surface_com = cv_point
+
+				surface_cv_it.next()
+
+			# Draw the surface's center of mass
+			if surface_com is not None:
+				draw_manager.text(surface_com, "{}".format(surface_com.w), dynamic=False)
+
+			# Update the surfaces' collective center of mass
+			if surfaces_com is not None:
+				surfaces_com = self.calc_center_mass([surfaces_com, surface_com])
+			else:
+				surfaces_com = surface_com
+
+		# Find the center of mass between those of the points', meshes' and surfaces'
+		center_of_masses = []
+		if points_com is not None and points_com.w > 0.0:
+			center_of_masses.append(points_com)
+
+		if meshes_com is not None and meshes_com.w > 0.0:
+			center_of_masses.append(meshes_com)
+
+		if surfaces_com is not None and surfaces_com.w > 0.0:
+			center_of_masses.append(surfaces_com)
+
+		# Draw the collective center of mass: points, meshes and surfaces
+		center_mass_point = self.calc_center_mass(center_of_masses)
 		draw_manager.text(center_mass_point, "{}".format(center_mass_point.w))
 
 		draw_manager.endDrawable()
